@@ -251,6 +251,8 @@ export interface EmotionEngineConfig {
   apiKey?: string;
   baseUrl: string;
   model: string;
+  /** Force a specific provider: "anthropic" | "openai". Auto-detected from model name if omitted. */
+  provider?: "anthropic" | "openai";
   classifierUrl?: string;
   confidenceMin: number;
   halfLifeHours: number;
@@ -274,8 +276,8 @@ export interface EmotionEngineConfig {
 
 /** Default configuration values. */
 export const DEFAULT_CONFIG: EmotionEngineConfig = {
-  baseUrl: "https://api.openai.com/v1",
-  model: "gpt-4o-mini",
+  baseUrl: "https://api.anthropic.com",
+  model: "claude-sonnet-4-5-20250514",
   confidenceMin: 0.35,
   halfLifeHours: 12,
   trendWindowHours: 24,

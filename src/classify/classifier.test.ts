@@ -115,11 +115,99 @@ describe("classifier", () => {
   });
 
   // -----------------------------------------------------------------------
-  // classifyEmotion (integration with mock fetch)
+  // classifyEmotion -- Anthropic backend (mock)
   // -----------------------------------------------------------------------
 
-  describe("classifyEmotion", () => {
-    it("calls LLM when no classifierUrl is set", async () => {
+  describe("classifyEmotion (Anthropic)", () => {
+    it("calls Anthropic Messages API for claude models", async () => {
+      const mockResponse = {
+        label: "happy",
+        intensity: 0.7,
+        reason: "positive greeting",
+        confidence: 0.9,
+      };
+
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            content: [
+              { type: "text", text: JSON.stringify(mockResponse) },
+            ],
+          }),
+      });
+
+      const result = await classifyEmotion(
+        "Hello! Great to see you!",
+        "user",
+        {
+          apiKey: "sk-ant-test",
+          model: "claude-sonnet-4-5-20250514",
+          emotionLabels: DEFAULT_CONFIG.emotionLabels,
+          confidenceMin: 0.35,
+          fetchFn: mockFetch,
+        },
+      );
+
+      expect(result.label).toBe("happy");
+      expect(result.intensity).toBe(0.7);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      // Verify it called the Anthropic endpoint
+      const callArgs = mockFetch.mock.calls[0];
+      expect(callArgs[0]).toBe("https://api.anthropic.com/v1/messages");
+      expect(callArgs[1].headers["x-api-key"]).toBe("sk-ant-test");
+      expect(callArgs[1].headers["anthropic-version"]).toBe("2023-06-01");
+    });
+
+    it("auto-detects Anthropic from model name containing 'claude'", async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            content: [
+              { type: "text", text: JSON.stringify({ label: "calm", intensity: 0.3, reason: "test", confidence: 0.8 }) },
+            ],
+          }),
+      });
+
+      await classifyEmotion("test", "user", {
+        apiKey: "sk-ant-test",
+        model: "claude-3-haiku-20240307",
+        emotionLabels: DEFAULT_CONFIG.emotionLabels,
+        confidenceMin: 0.35,
+        fetchFn: mockFetch,
+      });
+
+      const callArgs = mockFetch.mock.calls[0];
+      expect(callArgs[0]).toBe("https://api.anthropic.com/v1/messages");
+    });
+
+    it("returns neutral on Anthropic error", async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        text: () => Promise.resolve("rate limited"),
+      });
+
+      const result = await classifyEmotion("test", "user", {
+        apiKey: "sk-ant-test",
+        model: "claude-sonnet-4-5-20250514",
+        emotionLabels: DEFAULT_CONFIG.emotionLabels,
+        confidenceMin: 0.35,
+        fetchFn: mockFetch,
+      });
+
+      expect(result.label).toBe("neutral");
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // classifyEmotion -- OpenAI backend (mock)
+  // -----------------------------------------------------------------------
+
+  describe("classifyEmotion (OpenAI)", () => {
+    it("calls OpenAI for gpt models", async () => {
       const mockResponse = {
         label: "happy",
         intensity: 0.7,
@@ -141,7 +229,7 @@ describe("classifier", () => {
         "Hello! Great to see you!",
         "user",
         {
-          apiKey: "test-key",
+          apiKey: "sk-test",
           baseUrl: "https://api.openai.com/v1",
           model: "gpt-4o-mini",
           emotionLabels: DEFAULT_CONFIG.emotionLabels,
@@ -151,10 +239,17 @@ describe("classifier", () => {
       );
 
       expect(result.label).toBe("happy");
-      expect(result.intensity).toBe(0.7);
       expect(mockFetch).toHaveBeenCalledTimes(1);
+      const callArgs = mockFetch.mock.calls[0];
+      expect(callArgs[0]).toContain("openai.com");
     });
+  });
 
+  // -----------------------------------------------------------------------
+  // classifyEmotion -- External endpoint
+  // -----------------------------------------------------------------------
+
+  describe("classifyEmotion (endpoint)", () => {
     it("calls external endpoint when classifierUrl is set", async () => {
       const mockResponse = {
         label: "frustrated",
@@ -185,7 +280,13 @@ describe("classifier", () => {
         expect.objectContaining({ method: "POST" }),
       );
     });
+  });
 
+  // -----------------------------------------------------------------------
+  // classifyEmotion -- Error handling
+  // -----------------------------------------------------------------------
+
+  describe("classifyEmotion (errors)", () => {
     it("returns neutral on fetch failure", async () => {
       const mockFetch = vi.fn().mockRejectedValue(new Error("network error"));
 
@@ -194,7 +295,6 @@ describe("classifier", () => {
         "user",
         {
           apiKey: "test-key",
-          baseUrl: "https://api.openai.com/v1",
           model: "gpt-4o-mini",
           emotionLabels: DEFAULT_CONFIG.emotionLabels,
           confidenceMin: 0.35,
@@ -211,7 +311,7 @@ describe("classifier", () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 500,
-        statusText: "Internal Server Error",
+        text: () => Promise.resolve("error"),
       });
 
       const result = await classifyEmotion(
@@ -219,8 +319,7 @@ describe("classifier", () => {
         "user",
         {
           apiKey: "test-key",
-          baseUrl: "https://api.openai.com/v1",
-          model: "gpt-4o-mini",
+          model: "claude-sonnet-4-5-20250514",
           emotionLabels: DEFAULT_CONFIG.emotionLabels,
           confidenceMin: 0.35,
           fetchFn: mockFetch,

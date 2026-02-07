@@ -1,9 +1,13 @@
 /**
  * Unified emotion classifier.
  *
- * Supports two backends:
- *  1. LLM (OpenAI-compatible) -- structured JSON output
- *  2. External HTTP endpoint -- POST with text + role
+ * Supports three backends:
+ *  1. Anthropic Messages API (native) -- for claude-* models
+ *  2. OpenAI Chat Completions API -- for gpt-* and other OpenAI-compatible models
+ *  3. External HTTP endpoint -- POST with text + role
+ *
+ * Auto-detects provider from model name: models starting with "claude"
+ * route to Anthropic, everything else routes to OpenAI format.
  *
  * Falls back to neutral on any failure (no hard crashes in classification).
  */
@@ -12,13 +16,15 @@ import type { ClassificationResult } from "../types.js";
 
 /** Options for the classifyEmotion function. */
 export interface ClassifyOptions {
-  /** OpenAI API key (required if no classifierUrl). */
+  /** API key (Anthropic or OpenAI, depending on model). */
   apiKey?: string;
-  /** OpenAI-compatible base URL. */
+  /** Base URL override (for OpenAI-compatible endpoints). */
   baseUrl?: string;
   /** Model name for LLM classification. */
   model?: string;
-  /** External classifier URL (if set, bypasses LLM). */
+  /** Force a specific provider: "anthropic" | "openai". Auto-detected from model if omitted. */
+  provider?: "anthropic" | "openai";
+  /** External classifier URL (if set, bypasses LLM entirely). */
   classifierUrl?: string;
   /** Available emotion labels. */
   emotionLabels: string[];
@@ -37,12 +43,28 @@ const NEUTRAL_RESULT: ClassificationResult = {
   confidence: 0,
 };
 
+const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_VERSION = "2023-06-01";
+
+// ---------------------------------------------------------------------------
+// Provider Detection
+// ---------------------------------------------------------------------------
+
+/** Determine provider from model name. */
+function detectProvider(model: string): "anthropic" | "openai" {
+  const lower = model.toLowerCase();
+  if (lower.startsWith("claude") || lower.includes("claude")) {
+    return "anthropic";
+  }
+  return "openai";
+}
+
 // ---------------------------------------------------------------------------
 // Prompt Construction
 // ---------------------------------------------------------------------------
 
 /**
- * Build the system + user prompt for LLM classification.
+ * Build the classification prompt (shared across providers).
  */
 export function buildClassifierPrompt(
   text: string,
@@ -58,6 +80,16 @@ export function buildClassifierPrompt(
     `- reason: short phrase explaining what triggered the emotion\n` +
     `- confidence: number 0-1 (how confident you are in this classification)\n\n` +
     `Message:\n${text}`
+  );
+}
+
+/**
+ * Build the system instruction (used by both providers).
+ */
+function buildSystemInstruction(): string {
+  return (
+    "You are an emotion classifier. You return ONLY valid JSON. " +
+    "No markdown, no explanation, just a single JSON object."
   );
 }
 
@@ -133,8 +165,8 @@ export function coerceClassificationResult(
 /**
  * Classify the emotion in a text message.
  *
- * Routes to either an external HTTP endpoint or an LLM, depending on config.
- * Falls back to neutral on any failure.
+ * Routes to either an external HTTP endpoint, Anthropic, or OpenAI,
+ * depending on config. Falls back to neutral on any failure.
  */
 export async function classifyEmotion(
   text: string,
@@ -142,7 +174,7 @@ export async function classifyEmotion(
   options: ClassifyOptions,
 ): Promise<ClassificationResult> {
   const fetchFn = options.fetchFn ?? fetch;
-  const timeoutMs = options.timeoutMs ?? 5000;
+  const timeoutMs = options.timeoutMs ?? 10000;
 
   try {
     if (options.classifierUrl) {
@@ -152,20 +184,25 @@ export async function classifyEmotion(
     if (!options.apiKey) {
       throw new Error(
         "Emotion classifier requires either classifierUrl or apiKey. " +
-        "Set OPENAI_API_KEY or configure classifierUrl in the emotion-engine plugin config.",
+        "Configure apiKey or set ANTHROPIC_API_KEY / OPENAI_API_KEY in the emotion-engine plugin config.",
       );
     }
 
-    return await classifyViaLLM(
-      text,
-      role,
-      options.apiKey,
+    const model = options.model ?? "claude-sonnet-4-5-20250514";
+    const provider = options.provider ?? detectProvider(model);
+
+    if (provider === "anthropic") {
+      return await classifyViaAnthropic(
+        text, role, options.apiKey, model, fetchFn, timeoutMs,
+        options.emotionLabels, options.confidenceMin,
+      );
+    }
+
+    return await classifyViaOpenAI(
+      text, role, options.apiKey,
       options.baseUrl ?? "https://api.openai.com/v1",
-      options.model ?? "gpt-4o-mini",
-      fetchFn,
-      timeoutMs,
-      options.emotionLabels,
-      options.confidenceMin,
+      model, fetchFn, timeoutMs,
+      options.emotionLabels, options.confidenceMin,
     );
   } catch (err) {
     // If it's a configuration error (no apiKey), rethrow
@@ -206,10 +243,64 @@ async function classifyViaEndpoint(
 }
 
 // ---------------------------------------------------------------------------
-// Backend: OpenAI-compatible LLM
+// Backend: Anthropic Messages API (native)
 // ---------------------------------------------------------------------------
 
-async function classifyViaLLM(
+async function classifyViaAnthropic(
+  text: string,
+  role: string,
+  apiKey: string,
+  model: string,
+  fetchFn: typeof fetch,
+  timeoutMs: number,
+  labels: string[],
+  confidenceMin: number,
+): Promise<ClassificationResult> {
+  const userPrompt = buildClassifierPrompt(text, role, labels);
+  const systemInstruction = buildSystemInstruction();
+
+  const response = await fetchFn(ANTHROPIC_API_URL, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": ANTHROPIC_VERSION,
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 256,
+      system: systemInstruction,
+      messages: [
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.2,
+    }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Anthropic returned ${response.status}: ${body}`);
+  }
+
+  const data = (await response.json()) as {
+    content: Array<{ type: string; text?: string }>;
+  };
+
+  const textBlock = data.content?.find((b) => b.type === "text");
+  if (!textBlock?.text) {
+    throw new Error("Empty Anthropic response");
+  }
+
+  const parsed = parseClassifierResponse(textBlock.text);
+  return coerceClassificationResult(parsed, labels, confidenceMin);
+}
+
+// ---------------------------------------------------------------------------
+// Backend: OpenAI Chat Completions API
+// ---------------------------------------------------------------------------
+
+async function classifyViaOpenAI(
   text: string,
   role: string,
   apiKey: string,
@@ -233,6 +324,7 @@ async function classifyViaLLM(
       body: JSON.stringify({
         model,
         messages: [
+          { role: "system", content: buildSystemInstruction() },
           { role: "user", content: prompt },
         ],
         temperature: 0.2,
@@ -243,7 +335,7 @@ async function classifyViaLLM(
   );
 
   if (!response.ok) {
-    throw new Error(`LLM returned ${response.status}`);
+    throw new Error(`OpenAI returned ${response.status}`);
   }
 
   const data = (await response.json()) as {
@@ -252,7 +344,7 @@ async function classifyViaLLM(
 
   const content = data.choices?.[0]?.message?.content;
   if (!content) {
-    throw new Error("Empty LLM response");
+    throw new Error("Empty OpenAI response");
   }
 
   const parsed = parseClassifierResponse(content);

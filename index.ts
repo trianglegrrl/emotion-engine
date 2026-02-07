@@ -10,6 +10,7 @@
  *  - HTTP dashboard route (/emotion-dashboard)
  */
 
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { EmotionEngineConfig, OCEANProfile } from "./src/types.js";
@@ -28,9 +29,10 @@ function resolveConfig(raw?: Record<string, unknown>): EmotionEngineConfig {
   const personality = (raw?.personality ?? {}) as Partial<OCEANProfile>;
 
   return {
-    apiKey: (raw?.apiKey as string) ?? env.OPENAI_API_KEY ?? undefined,
+    apiKey: (raw?.apiKey as string) ?? env.ANTHROPIC_API_KEY ?? env.OPENAI_API_KEY ?? undefined,
     baseUrl: (raw?.baseUrl as string) ?? env.OPENAI_BASE_URL ?? DEFAULT_CONFIG.baseUrl,
     model: (raw?.model as string) ?? env.EMOTION_MODEL ?? DEFAULT_CONFIG.model,
+    provider: (raw?.provider as "anthropic" | "openai" | undefined) ?? undefined,
     classifierUrl: (raw?.classifierUrl as string) ?? env.EMOTION_CLASSIFIER_URL ?? undefined,
     confidenceMin: (raw?.confidenceMin as number) ?? (Number(env.EMOTION_CONFIDENCE_MIN) || DEFAULT_CONFIG.confidenceMin),
     halfLifeHours: (raw?.halfLifeHours as number) ?? (Number(env.EMOTION_HALF_LIFE_HOURS) || DEFAULT_CONFIG.halfLifeHours),
@@ -59,9 +61,29 @@ function resolveConfig(raw?: Record<string, unknown>): EmotionEngineConfig {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Plugin Definition
-// ---------------------------------------------------------------------------
+/**
+ * Attempt to resolve an Anthropic API key from OpenClaw's auth-profiles.json.
+ * Falls back gracefully if the file doesn't exist or has no Anthropic profile.
+ */
+function resolveApiKeyFromAuthProfiles(api: any): string | undefined {
+  try {
+    const stateDir = api.resolvePath
+      ? api.resolvePath(".")
+      : path.join(os.homedir(), ".openclaw", "agents", "main", "agent");
+    const authFile = path.join(stateDir, "auth-profiles.json");
+    if (!fs.existsSync(authFile)) return undefined;
+    const raw = JSON.parse(fs.readFileSync(authFile, "utf8"));
+    const profiles = raw?.profiles ?? {};
+    for (const profile of Object.values(profiles) as any[]) {
+      if (profile?.provider === "anthropic" && profile?.token) {
+        return profile.token;
+      }
+    }
+  } catch {
+    // Not critical
+  }
+  return undefined;
+}
 
 const emotionEnginePlugin = {
   id: "emotion-engine",
@@ -73,6 +95,14 @@ const emotionEnginePlugin = {
   register(api: any) {
     const config = resolveConfig(api.pluginConfig);
 
+    // Resolve API key from OpenClaw auth profiles if not explicitly configured
+    if (!config.apiKey) {
+      const resolvedKey = resolveApiKeyFromAuthProfiles(api);
+      if (resolvedKey) {
+        config.apiKey = resolvedKey;
+      }
+    }
+
     // Resolve state file path
     const stateDir = api.resolvePath
       ? api.resolvePath(".")
@@ -82,7 +112,7 @@ const emotionEnginePlugin = {
     const manager = new StateManager(statePath, config);
 
     api.logger?.info?.(
-      `emotion-engine: registered (state: ${statePath}, model: ${config.model})`,
+      `emotion-engine: registered (state: ${statePath}, model: ${config.model}, provider: ${config.provider ?? "auto"})`,
     );
 
     // -- Tool --

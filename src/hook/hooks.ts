@@ -127,16 +127,19 @@ export function createAgentEndHook(
       // Find latest assistant message
       const assistantMsg = findLast(event.messages, "assistant");
 
+      const classifyOpts = {
+        apiKey: config.apiKey,
+        baseUrl: config.baseUrl,
+        model: config.model,
+        provider: config.provider,
+        classifierUrl: config.classifierUrl,
+        emotionLabels: config.emotionLabels,
+        confidenceMin: config.confidenceMin,
+        fetchFn,
+      };
+
       if (userMsg) {
-        const result = await classifyEmotion(userMsg.content, "user", {
-          apiKey: config.apiKey,
-          baseUrl: config.baseUrl,
-          model: config.model,
-          classifierUrl: config.classifierUrl,
-          emotionLabels: config.emotionLabels,
-          confidenceMin: config.confidenceMin,
-          fetchFn,
-        });
+        const result = await classifyEmotion(userMsg.content, "user", classifyOpts);
 
         if (result.label !== "neutral" || result.confidence > 0) {
           state = manager.updateUserEmotion(state, userKey, result);
@@ -146,15 +149,7 @@ export function createAgentEndHook(
       }
 
       if (assistantMsg) {
-        const result = await classifyEmotion(assistantMsg.content, "assistant", {
-          apiKey: config.apiKey,
-          baseUrl: config.baseUrl,
-          model: config.model,
-          classifierUrl: config.classifierUrl,
-          emotionLabels: config.emotionLabels,
-          confidenceMin: config.confidenceMin,
-          fetchFn,
-        });
+        const result = await classifyEmotion(assistantMsg.content, "assistant", classifyOpts);
 
         if (result.label !== "neutral" || result.confidence > 0) {
           state = manager.updateAgentEmotion(state, agentId, result);

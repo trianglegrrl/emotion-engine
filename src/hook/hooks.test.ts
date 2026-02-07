@@ -125,22 +125,21 @@ describe("hooks", () => {
         ok: true,
         json: () =>
           Promise.resolve({
-            choices: [
+            content: [
               {
-                message: {
-                  content: JSON.stringify({
-                    label: "frustrated",
-                    intensity: 0.6,
-                    reason: "debugging issues",
-                    confidence: 0.85,
-                  }),
-                },
+                type: "text",
+                text: JSON.stringify({
+                  label: "frustrated",
+                  intensity: 0.6,
+                  reason: "debugging issues",
+                  confidence: 0.85,
+                }),
               },
             ],
           }),
       });
 
-      const config = { ...DEFAULT_CONFIG, apiKey: "test-key" };
+      const config = { ...DEFAULT_CONFIG, apiKey: "sk-ant-test" };
       const mgr = new StateManager(statePath, config);
       const handler = createAgentEndHook(mgr, config, mockFetchFn);
 
