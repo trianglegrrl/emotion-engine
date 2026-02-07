@@ -8,6 +8,7 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue.svg)](https://www.typescriptlang.org/)
 [![OpenClaw Plugin](https://img.shields.io/badge/OpenClaw-plugin-purple.svg)](https://openclaw.com)
+[![npm](https://img.shields.io/npm/v/openfeelz.svg)](https://www.npmjs.com/package/openfeelz)
 
 An [OpenClaw](https://openclaw.com) plugin that gives AI agents a multidimensional emotional model with personality-influenced decay, rumination, and multi-agent awareness.
 
@@ -30,10 +31,14 @@ Most agents vibes-check each message independently and forget everything between
 
 ## Installation
 
+OpenClaw resolves plugin names from the npm registry, so you can install by package name (no URL or path needed):
+
 ```bash
 openclaw plugins install openfeelz
 openclaw plugins enable openfeelz
 ```
+
+Restart the gateway after installing. To pin a version: `openclaw plugins install openfeelz@0.9.1`. To install from a local clone (e.g. for development), run `npm run build` in the repo first, then `openclaw plugins install /path/to/openfeelz`.
 
 ## How It Works
 
