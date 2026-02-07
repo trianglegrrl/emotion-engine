@@ -2,12 +2,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createDashboardHandler, buildDashboardHtml } from "./dashboard.js";
 import { StateManager } from "../state/state-manager.js";
 import { DEFAULT_CONFIG } from "../types.js";
-import type { EmotionEngineConfig } from "../types.js";
-import { DIMENSION_NAMES } from "../types.js";
 
 describe("dashboard", () => {
   let tmpDir: string;

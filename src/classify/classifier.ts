@@ -14,7 +14,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import type { ClassificationResult } from "../types.js";
 
 /** Options for the classifyEmotion function. */
