@@ -298,7 +298,8 @@ const emotionEnginePlugin = {
 
     // -- CLI --
     api.registerCli(
-      ({ program }: { program: any }) => registerEmotionCli({ program, getManager, config }),
+      ({ program, config: openclawConfig, workspaceDir }) =>
+        registerEmotionCli({ program, getManager, config, workspaceDir, openclawConfig }),
       { commands: ["emotion"] },
     );
 

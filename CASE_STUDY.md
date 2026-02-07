@@ -18,35 +18,13 @@ the deployment autonomously.
 
 ### 1. Development (on local machine)
 
-The plugin was built test-first across 20 test files (237 tests). All code was
+The plugin was built test-first across 25 test files (299 tests). All code was
 written, tested, and passing before any deployment began.
 
-### 2. SCP source to target machine
+### 2. Install plugin into OpenClaw (by name from registry)
 
 ```
-$ scp -r openfeelz/ user@host:~/openfeelz/
-```
-
-### 3. Install dependencies on target
-
-```
-$ ssh user@host "cd ~/openfeelz && npm install"
-```
-
-### 4. Run tests on target -- all 237 passing
-
-```
-$ ssh user@host "cd ~/openfeelz && npx vitest run"
-
- Test Files  20 passed (20)
-      Tests  237 passed (237)
-   Duration  658ms
-```
-
-### 5. Install plugin into OpenClaw
-
-```
-$ ssh user@host "openclaw plugins install ~/openfeelz"
+$ ssh user@host "openclaw plugins install openfeelz"
 
 Installing to /home/user/.openclaw/extensions/openfeelz…
 Installing plugin dependencies…
@@ -55,7 +33,10 @@ Installed plugin: openfeelz
 Restart the gateway to load plugins.
 ```
 
-### 6. Enable plugin
+The plugin is installed from the npm registry by name. For development you can
+instead install from a local path: `openclaw plugins install ~/openfeelz`.
+
+### 3. Enable plugin
 
 ```
 $ ssh user@host "openclaw plugins enable openfeelz"
@@ -63,7 +44,7 @@ $ ssh user@host "openclaw plugins enable openfeelz"
 Enabled plugin "openfeelz". Restart the gateway to apply.
 ```
 
-### 7. Restart gateway
+### 4. Restart gateway
 
 ```
 $ ssh user@host "openclaw gateway restart"
@@ -72,7 +53,7 @@ $ ssh user@host "openclaw gateway restart"
 Restarted systemd service: openclaw-gateway.service
 ```
 
-### 8. Verify plugin loaded
+### 5. Verify plugin loaded
 
 ```
 $ ssh user@host "openclaw plugins list"
@@ -81,14 +62,14 @@ Plugins (2/32 loaded)
 ┌──────────────┬──────────┬──────────┬──────────────────────────────────────────────┬─────────┐
 │ Name         │ ID       │ Status   │ Source                                       │ Version │
 ├──────────────┼──────────┼──────────┼──────────────────────────────────────────────┼─────────┤
-│ OpenFeelz    │ open-    │ loaded   │ ~/.openclaw/extensions/openfeelz/            │ 0.1.0   │
-│              │ feelz    │          │ index.ts                                     │         │
+│ OpenFeelz    │ open-    │ loaded   │ ~/.openclaw/extensions/openfeelz/            │ 0.9.4   │
+│              │ feelz    │          │                                              │         │
 └──────────────┴──────────┴──────────┴──────────────────────────────────────────────┴─────────┘
 ```
 
 Status: **loaded** (not just enabled -- actively running in the gateway).
 
-### 9. Verify CLI: `openclaw emotion status`
+### 6. Verify CLI: `openclaw emotion status`
 
 ```
 $ ssh user@host "openclaw emotion status"
@@ -112,7 +93,7 @@ Total Updates: 0
 All dimensions at their default baselines. PAD dimensions centered at 0,
 extension dimensions at 0.5. No emotional stimuli recorded yet.
 
-### 10. Verify CLI: `openclaw emotion personality`
+### 7. Verify CLI: `openclaw emotion personality`
 
 ```
 $ ssh user@host "openclaw emotion personality"
@@ -127,7 +108,7 @@ OCEAN Personality Profile:
 
 Default neutral personality. All traits at midpoint.
 
-### 11. Verify CLI: `openclaw emotion context`
+### 8. Verify CLI: `openclaw emotion context`
 
 Outputs the XML block that would be injected into the system prompt:
 
@@ -139,7 +120,7 @@ $ ssh user@host "openclaw emotion context"
 
 After applying a stimulus, the context command outputs the `<emotion_state>` block with dimensions and recent emotions.
 
-### 12. Verify CLI: `openclaw emotion status --json`
+### 9. Verify CLI: `openclaw emotion status --json`
 
 ```
 $ ssh user@host "openclaw emotion status --json"
@@ -176,7 +157,7 @@ $ ssh user@host "openclaw emotion status --json"
 }
 ```
 
-### 13. Verify HTTP dashboard
+### 10. Verify HTTP dashboard
 
 ```
 $ curl -s -H "Authorization: Bearer <token>" http://localhost:<port>/emotion-dashboard | head -5
@@ -190,7 +171,7 @@ $ curl -s -H "Authorization: Bearer <token>" http://localhost:<port>/emotion-das
 
 HTML dashboard served successfully at `/emotion-dashboard`.
 
-### 14. Verify dashboard JSON API
+### 11. Verify dashboard JSON API
 
 ```
 $ curl -s -H "Authorization: Bearer <token>" "http://localhost:<port>/emotion-dashboard?format=json"
@@ -242,12 +223,13 @@ Tests include:
 | Scripted smoke tests | `./scripts/smoke-test.sh` | Modify, decay, reset verified |
 | Anthropic model config | Gateway startup log | `model: claude-sonnet-4-5-20250514, provider: auto` |
 | Auth profile resolution | Gateway startup log | API key resolved from `auth-profiles.json` |
-| Test suite on target | `npx vitest run` | 20 files, 240 tests, all passing |
+| Test suite on target | `npx vitest run` | 25 files, 299 tests, all passing |
 
 ## What This Demonstrates
 
 1. **The plugin is a standalone, self-contained package** that installs into any
-   OpenClaw instance via `openclaw plugins install <path>`.
+   OpenClaw instance via `openclaw plugins install openfeelz` (from the registry)
+   or `openclaw plugins install <path>` for a local build.
 
 2. **The native Anthropic Messages API** is used for emotion classification --
    no OpenAI proxy needed. The provider is auto-detected from the model name
@@ -260,8 +242,12 @@ Tests include:
    install to gateway restart to verification. No manual SSH sessions were
    required.
 
-5. **237 tests pass on the target machine** before the plugin is activated,
-   providing confidence that the code works in the deployment environment.
+5. **299 tests pass** (25 test files), providing confidence that the code works
+   in the deployment environment.
+
+**Reproduction:** The same flow can be reproduced by SSH to **ellie@localhost**
+and running `openclaw plugins install openfeelz`, then enable and restart the
+gateway as above.
 
 ## Repository
 

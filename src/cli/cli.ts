@@ -23,14 +23,23 @@ import {
 import { formatEmotionBlock } from "../format/prompt-formatter.js";
 import type { EmotionEngineConfig } from "../types.js";
 import type { StateManager } from "../state/state-manager.js";
+import { runConfigureWizard } from "./configure-wizard.js";
 
 interface CliParams {
   program: Command;
   getManager: (agentId: string) => StateManager;
   config?: Partial<EmotionEngineConfig>;
+  workspaceDir?: string;
+  openclawConfig?: unknown;
 }
 
-export function registerEmotionCli({ program, getManager, config }: CliParams): void {
+export function registerEmotionCli({
+  program,
+  getManager,
+  config,
+  workspaceDir,
+  openclawConfig,
+}: CliParams): void {
   const root = program
     .command("emotion")
     .description("OpenFeelz utilities")
@@ -259,6 +268,25 @@ export function registerEmotionCli({ program, getManager, config }: CliParams): 
       state.decayRates[opts.dimension as DimensionName] = opts.rate;
       await manager.saveState(state);
       console.log(`Set ${opts.dimension} decay rate to ${opts.rate}/hr`);
+    });
+
+  // -----------------------------------------------------------------------
+  // configure
+  // -----------------------------------------------------------------------
+
+  root
+    .command("configure")
+    .description("Interactive configuration wizard")
+    .option("--agent <id>", "Agent ID", "main")
+    .action(async (opts: { agent?: string }) => {
+      const agentId = opts.agent ?? agentOpts();
+      await runConfigureWizard({
+        getManager,
+        agentId,
+        pluginConfig: config,
+        openclawConfig,
+        workspaceDir,
+      });
     });
 }
 

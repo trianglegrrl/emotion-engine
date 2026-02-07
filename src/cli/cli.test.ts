@@ -47,6 +47,14 @@ describe("cli", () => {
     expect(cmd).toBeDefined();
   });
 
+  it("registers emotion configure subcommand", () => {
+    registerEmotionCli({ program, getManager });
+    const emotionCmd = program.commands.find((c) => c.name() === "emotion");
+    expect(emotionCmd).toBeDefined();
+    const configureCmd = emotionCmd!.commands.find((c) => c.name() === "configure");
+    expect(configureCmd).toBeDefined();
+  });
+
   describe("status", () => {
     it("prints formatted state", async () => {
       registerEmotionCli({ program, getManager });
