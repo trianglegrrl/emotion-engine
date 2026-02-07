@@ -280,6 +280,7 @@ async function classifyViaAnthropic(
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
+    console.error("[openfeelz] Anthropic classification API error:", response.status, body.slice(0, 500));
     throw new Error(`Anthropic returned ${response.status}: ${body}`);
   }
 
@@ -289,6 +290,7 @@ async function classifyViaAnthropic(
 
   const textBlock = data.content?.find((b) => b.type === "text");
   if (!textBlock?.text) {
+    console.error("[openfeelz] Anthropic classification returned no text block; content length:", data.content?.length ?? 0);
     throw new Error("Empty Anthropic response");
   }
 
@@ -329,12 +331,15 @@ async function classifyViaOpenAI(
         ],
         temperature: 0.2,
         response_format: { type: "json_object" },
+        max_completion_tokens: 1000, // reasoning models (e.g. gpt-5-mini) need headroom
       }),
       signal: AbortSignal.timeout(timeoutMs),
     },
   );
 
   if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    console.error("[openfeelz] OpenAI classification API error:", response.status, body.slice(0, 500));
     throw new Error(`OpenAI returned ${response.status}`);
   }
 
@@ -344,6 +349,7 @@ async function classifyViaOpenAI(
 
   const content = data.choices?.[0]?.message?.content;
   if (!content) {
+    console.error("[openfeelz] OpenAI classification returned no content; choices:", JSON.stringify(data.choices?.length ?? 0));
     throw new Error("Empty OpenAI response");
   }
 

@@ -38,7 +38,7 @@ openclaw plugins install openfeelz
 openclaw plugins enable openfeelz
 ```
 
-Restart the gateway after installing. To pin a version: `openclaw plugins install openfeelz@0.9.1`. To install from a local clone (e.g. for development), run `npm run build` in the repo first, then `openclaw plugins install /path/to/openfeelz`.
+Restart the gateway after installing. To pin a version: `openclaw plugins install openfeelz@0.9.2`. To install from a local clone (e.g. for development), run `npm run build` in the repo first, then `openclaw plugins install /path/to/openfeelz`.
 
 ## How It Works
 
