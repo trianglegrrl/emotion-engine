@@ -1,0 +1,40 @@
+{
+  "name": "@openclaw/emotion-engine",
+  "version": "0.1.0",
+  "description": "PAD + Ekman + OCEAN emotional model plugin for OpenClaw agents",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./mcp": "./dist/src/mcp/mcp-server.js"
+  },
+  "bin": {
+    "emotion-engine-mcp": "./dist/src/mcp/mcp-server.js"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint ."
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.1.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "commander": "^14.0.3"
+  },
+  "devDependencies": {
+    "@sinclair/typebox": "^0.34.48",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}

@@ -1,0 +1,164 @@
+{
+  "id": "emotion-engine",
+  "name": "Emotion Engine",
+  "description": "PAD + Ekman + OCEAN emotional model with decay, rumination, and personality",
+  "uiHints": {
+    "model": {
+      "label": "Classification Model",
+      "placeholder": "gpt-4o-mini",
+      "help": "OpenAI-compatible model for emotion classification"
+    },
+    "classifierUrl": {
+      "label": "External Classifier URL",
+      "placeholder": "https://your-classifier.example.com/classify",
+      "advanced": true,
+      "help": "Optional HTTP endpoint for emotion classification (overrides LLM)"
+    },
+    "confidenceMin": {
+      "label": "Minimum Confidence",
+      "help": "Discard classifications below this confidence (0-1)",
+      "advanced": true
+    },
+    "halfLifeHours": {
+      "label": "Decay Half-Life (hours)",
+      "help": "How many hours until emotions decay halfway to baseline"
+    },
+    "trendWindowHours": {
+      "label": "Trend Window (hours)",
+      "advanced": true
+    },
+    "maxHistory": {
+      "label": "Max Stimulus History",
+      "advanced": true
+    },
+    "ruminationEnabled": {
+      "label": "Enable Rumination",
+      "help": "Intense emotions continue to influence state over multiple interactions"
+    },
+    "ruminationThreshold": {
+      "label": "Rumination Threshold",
+      "help": "Emotion intensity above which rumination activates (0-1)",
+      "advanced": true
+    },
+    "ruminationMaxStages": {
+      "label": "Max Rumination Stages",
+      "advanced": true
+    },
+    "realtimeClassification": {
+      "label": "Realtime Classification",
+      "help": "Classify emotions on every message (not just at session end)",
+      "advanced": true
+    },
+    "promptInjectionEnabled": {
+      "label": "Inject Emotions into Prompt",
+      "help": "Add emotional context to the agent system prompt"
+    },
+    "decayServiceEnabled": {
+      "label": "Background Decay Service",
+      "help": "Run periodic decay even when no interaction occurs",
+      "advanced": true
+    },
+    "decayServiceIntervalMinutes": {
+      "label": "Decay Service Interval (min)",
+      "advanced": true
+    },
+    "dashboardEnabled": {
+      "label": "Enable Dashboard",
+      "help": "Serve emotion visualization at /emotion-dashboard"
+    },
+    "timezone": {
+      "label": "Timezone",
+      "placeholder": "America/Los_Angeles",
+      "advanced": true
+    },
+    "personality.openness": {
+      "label": "Openness",
+      "help": "Curiosity, creativity, preference for novelty (0-1)"
+    },
+    "personality.conscientiousness": {
+      "label": "Conscientiousness",
+      "help": "Organization, dependability, self-discipline (0-1)"
+    },
+    "personality.extraversion": {
+      "label": "Extraversion",
+      "help": "Sociability, assertiveness, positive emotionality (0-1)"
+    },
+    "personality.agreeableness": {
+      "label": "Agreeableness",
+      "help": "Cooperation, trust, empathy (0-1)"
+    },
+    "personality.neuroticism": {
+      "label": "Neuroticism",
+      "help": "Emotional sensitivity, tendency to linger in negative states (0-1)"
+    },
+    "decayRates.*": {
+      "label": "Decay Rate Override",
+      "advanced": true,
+      "help": "Per-dimension decay rate (higher = faster decay)"
+    },
+    "dimensionBaselines.*": {
+      "label": "Baseline Override",
+      "advanced": true,
+      "help": "Per-dimension resting value override"
+    },
+    "apiKey": {
+      "label": "OpenAI API Key",
+      "sensitive": true,
+      "placeholder": "sk-...",
+      "help": "API key for LLM classification (or use ${OPENAI_API_KEY})"
+    },
+    "baseUrl": {
+      "label": "OpenAI Base URL",
+      "placeholder": "https://api.openai.com/v1",
+      "advanced": true
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "apiKey": { "type": "string" },
+      "baseUrl": { "type": "string" },
+      "model": { "type": "string" },
+      "classifierUrl": { "type": "string" },
+      "confidenceMin": { "type": "number", "minimum": 0, "maximum": 1 },
+      "halfLifeHours": { "type": "number", "minimum": 0.1 },
+      "trendWindowHours": { "type": "number", "minimum": 1 },
+      "maxHistory": { "type": "integer", "minimum": 10 },
+      "ruminationEnabled": { "type": "boolean" },
+      "ruminationThreshold": { "type": "number", "minimum": 0, "maximum": 1 },
+      "ruminationMaxStages": { "type": "integer", "minimum": 1, "maximum": 10 },
+      "realtimeClassification": { "type": "boolean" },
+      "promptInjectionEnabled": { "type": "boolean" },
+      "decayServiceEnabled": { "type": "boolean" },
+      "decayServiceIntervalMinutes": { "type": "number", "minimum": 1 },
+      "dashboardEnabled": { "type": "boolean" },
+      "timezone": { "type": "string" },
+      "maxOtherAgents": { "type": "integer", "minimum": 0 },
+      "emotionLabels": {
+        "type": "array",
+        "items": { "type": "string" },
+        "minItems": 1
+      },
+      "personality": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "openness": { "type": "number", "minimum": 0, "maximum": 1 },
+          "conscientiousness": { "type": "number", "minimum": 0, "maximum": 1 },
+          "extraversion": { "type": "number", "minimum": 0, "maximum": 1 },
+          "agreeableness": { "type": "number", "minimum": 0, "maximum": 1 },
+          "neuroticism": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      },
+      "decayRates": {
+        "type": "object",
+        "additionalProperties": { "type": "number", "minimum": 0 }
+      },
+      "dimensionBaselines": {
+        "type": "object",
+        "additionalProperties": { "type": "number" }
+      }
+    }
+  }
+}
