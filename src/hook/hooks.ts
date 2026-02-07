@@ -10,6 +10,7 @@ import { StateManager } from "../state/state-manager.js";
 import { loadOtherAgentStatesFromConfig } from "../state/multi-agent.js";
 import { classifyEmotion } from "../classify/classifier.js";
 import { formatEmotionBlock } from "../format/prompt-formatter.js";
+import { extractMessageText } from "../utils/message-content.js";
 
 // ---------------------------------------------------------------------------
 // Types for hook events (minimal, matching OpenClaw's plugin hook API)
@@ -27,7 +28,7 @@ interface BootstrapResult {
 
 interface AgentEndEvent {
   success: boolean;
-  messages: Array<{ role: string; content: string }>;
+  messages: Array<{ role: string; content: unknown }>;
   userKey?: string;
   agentId?: string;
 }
@@ -149,20 +150,26 @@ export function createAgentEndHook(
       };
 
       if (userMsg) {
-        const result = await classifyEmotion(userMsg.content, "user", classifyOpts);
+        const text = extractMessageText(userMsg.content);
+        if (text) {
+          const result = await classifyEmotion(text, "user", classifyOpts);
 
         if (result.label !== "neutral" || result.confidence > 0) {
           state = manager.updateUserEmotion(state, userKey, result);
           // Also apply as stimulus to the dimensional model
           state = manager.applyStimulus(state, result.label, result.intensity, result.reason);
         }
+        }
       }
 
       if (assistantMsg) {
-        const result = await classifyEmotion(assistantMsg.content, "assistant", classifyOpts);
+        const text = extractMessageText(assistantMsg.content);
+        if (text) {
+          const result = await classifyEmotion(text, "assistant", classifyOpts);
 
         if (result.label !== "neutral" || result.confidence > 0) {
           state = manager.updateAgentEmotion(state, agentId, result);
+        }
         }
       }
 
@@ -178,12 +185,13 @@ export function createAgentEndHook(
 // ---------------------------------------------------------------------------
 
 function findLast(
-  messages: Array<{ role: string; content: string }>,
+  messages: Array<{ role: string; content: unknown }>,
   role: string,
-): { role: string; content: string } | undefined {
+): { role: string; content: unknown } | undefined {
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === role && messages[i].content.trim()) {
-      return messages[i];
+    const msg = messages[i];
+    if (msg.role === role && extractMessageText(msg.content) !== "") {
+      return msg;
     }
   }
   return undefined;
