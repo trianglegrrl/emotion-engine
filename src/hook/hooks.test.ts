@@ -143,7 +143,7 @@ describe("hooks", () => {
 
       const config = { ...DEFAULT_CONFIG, apiKey: "sk-ant-test" };
       const mgr = new StateManager(statePath, config);
-      const handler = createAgentEndHook(() => mgr, config, mockFetchFn);
+      const handler = createAgentEndHook(() => mgr, config, undefined, mockFetchFn);
 
       await handler({
         success: true,

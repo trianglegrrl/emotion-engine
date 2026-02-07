@@ -6,3 +6,4 @@ coverage/
 *.lock
 !package-lock.json
 .cursor/
+*.tgz

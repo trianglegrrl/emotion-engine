@@ -242,6 +242,34 @@ describe("classifier", () => {
       const callArgs = mockFetch.mock.calls[0];
       expect(callArgs[0]).toContain("openai.com");
     });
+
+    it("omits temperature for reasoning models (gpt-5-mini, o1, o3)", async () => {
+      const mockResponse = {
+        label: "curious",
+        intensity: 0.5,
+        reason: "asking questions",
+        confidence: 0.8,
+      };
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            choices: [{ message: { content: JSON.stringify(mockResponse) } }],
+          }),
+      });
+
+      await classifyEmotion("How does this work?", "user", {
+        apiKey: "sk-test",
+        model: "gpt-5-mini",
+        emotionLabels: DEFAULT_CONFIG.emotionLabels,
+        confidenceMin: 0.35,
+        fetchFn: mockFetch,
+      });
+
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.model).toBe("gpt-5-mini");
+      expect(body).not.toHaveProperty("temperature");
+    });
   });
 
   // -----------------------------------------------------------------------

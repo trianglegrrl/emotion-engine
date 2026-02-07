@@ -113,15 +113,18 @@ export function createBootstrapHook(
 export function createAgentEndHook(
   getManager: (agentId: string) => StateManager,
   config: EmotionEngineConfig,
+  classificationLogPath?: string,
   fetchFn?: typeof fetch,
 ): (event: AgentEndEvent) => Promise<void> {
   return async (event) => {
     if (!event.success || !event.messages || event.messages.length === 0) {
+      console.log("[openfeelz] Skipping agent_end: no success or messages");
       return;
     }
 
     // Need either apiKey or classifierUrl to classify
     if (!config.apiKey && !config.classifierUrl) {
+      console.warn("[openfeelz] Skipping classification: no apiKey or classifierUrl configured");
       return;
     }
 
@@ -138,6 +141,8 @@ export function createAgentEndHook(
       // Find latest assistant message
       const assistantMsg = findLast(event.messages, "assistant");
 
+      console.log(`[openfeelz] Processing messages - user: ${!!userMsg}, assistant: ${!!assistantMsg}`);
+
       const classifyOpts = {
         apiKey: config.apiKey,
         baseUrl: config.baseUrl,
@@ -146,30 +151,35 @@ export function createAgentEndHook(
         classifierUrl: config.classifierUrl,
         emotionLabels: config.emotionLabels,
         confidenceMin: config.confidenceMin,
+        classificationLogPath,
         fetchFn,
       };
 
       if (userMsg) {
         const text = extractMessageText(userMsg.content);
         if (text) {
+          console.log(`[openfeelz] Classifying user message (${text.length} chars)`);
           const result = await classifyEmotion(text, "user", classifyOpts);
+          console.log(`[openfeelz] User emotion: ${result.label} (intensity: ${result.intensity}, confidence: ${result.confidence})`);
 
-        if (result.label !== "neutral" || result.confidence > 0) {
-          state = manager.updateUserEmotion(state, userKey, result);
-          // Also apply as stimulus to the dimensional model
-          state = manager.applyStimulus(state, result.label, result.intensity, result.reason);
-        }
+          if (result.label !== "neutral" || result.confidence > 0) {
+            state = manager.updateUserEmotion(state, userKey, result);
+            // Also apply as stimulus to the dimensional model
+            state = manager.applyStimulus(state, result.label, result.intensity, result.reason);
+          }
         }
       }
 
       if (assistantMsg) {
         const text = extractMessageText(assistantMsg.content);
         if (text) {
+          console.log(`[openfeelz] Classifying assistant message (${text.length} chars)`);
           const result = await classifyEmotion(text, "assistant", classifyOpts);
+          console.log(`[openfeelz] Assistant emotion: ${result.label} (intensity: ${result.intensity}, confidence: ${result.confidence})`);
 
-        if (result.label !== "neutral" || result.confidence > 0) {
-          state = manager.updateAgentEmotion(state, agentId, result);
-        }
+          if (result.label !== "neutral" || result.confidence > 0) {
+            state = manager.updateAgentEmotion(state, agentId, result);
+          }
         }
       }
 

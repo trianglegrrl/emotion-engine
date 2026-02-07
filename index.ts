@@ -18,7 +18,7 @@ import path from "node:path";
 import type { EmotionEngineConfig, OCEANProfile } from "./src/types.js";
 import { DEFAULT_CONFIG } from "./src/types.js";
 import { StateManager } from "./src/state/state-manager.js";
-import { resolveAgentDir, resolveAgentStatePath, listAgentIds } from "./src/paths.js";
+import { resolveAgentDir, resolveAgentStatePath, resolveAgentWorkspaceDir, listAgentIds } from "./src/paths.js";
 import { createEmotionTool } from "./src/tool/emotion-tool.js";
 import { createBootstrapHook, createAgentEndHook } from "./src/hook/hooks.js";
 import { registerEmotionCli } from "./src/cli/cli.js";
@@ -79,23 +79,54 @@ function resolveConfig(raw?: Record<string, unknown>): EmotionEngineConfig {
 }
 
 /**
- * Attempt to resolve an Anthropic API key from OpenClaw's auth-profiles.json.
- * Falls back gracefully if the file doesn't exist or has no Anthropic profile.
+ * Attempt to resolve an API key from OpenClaw's auth-profiles.json.
+ * Supports both Anthropic and OpenAI providers.
+ * Falls back gracefully if the file doesn't exist or has no matching profile.
  */
 function resolveApiKeyFromAuthProfiles(api: any, agentId = "main"): string | undefined {
   try {
     const agentDir = resolveAgentDir(api.config, agentId);
     const authFile = path.join(agentDir, "auth-profiles.json");
-    if (!fs.existsSync(authFile)) return undefined;
+
+    console.log(`[openfeelz] Checking auth profiles at: ${authFile}`);
+
+    if (!fs.existsSync(authFile)) {
+      console.log("[openfeelz] Auth profiles file does not exist");
+      return undefined;
+    }
+
     const raw = JSON.parse(fs.readFileSync(authFile, "utf8"));
     const profiles = raw?.profiles ?? {};
-    for (const profile of Object.values(profiles) as any[]) {
-      if (profile?.provider === "anthropic" && profile?.token) {
-        return profile.token;
+    const profileKeys = Object.keys(profiles);
+
+    console.log(`[openfeelz] Found ${profileKeys.length} auth profiles: ${profileKeys.join(", ")}`);
+
+    // Try to find Anthropic key first (preferred for claude models)
+    for (const [profileId, profile] of Object.entries(profiles) as [string, any][]) {
+      if (profile?.provider === "anthropic") {
+        // Support both 'token' and 'key' fields
+        const key = profile?.token || profile?.key;
+        if (key) {
+          console.log(`[openfeelz] Using Anthropic key from profile: ${profileId}`);
+          return key;
+        }
       }
     }
-  } catch {
-    // Not critical
+
+    // Fallback to OpenAI key
+    for (const [profileId, profile] of Object.entries(profiles) as [string, any][]) {
+      if (profile?.provider === "openai") {
+        const key = profile?.token || profile?.key || profile?.apiKey;
+        if (key) {
+          console.log(`[openfeelz] Using OpenAI key from profile: ${profileId}`);
+          return key;
+        }
+      }
+    }
+
+    console.log("[openfeelz] No Anthropic or OpenAI keys found in auth profiles");
+  } catch (err) {
+    console.error("[openfeelz] Error reading auth profiles:", err);
   }
   return undefined;
 }
@@ -110,12 +141,20 @@ const emotionEnginePlugin = {
   register(api: any) {
     const config = resolveConfig(api.pluginConfig);
 
+    console.log("[openfeelz] Initial config - apiKey present:", !!config.apiKey, "model:", config.model);
+
     // Resolve API key from OpenClaw auth profiles if not explicitly configured
     if (!config.apiKey) {
+      console.log("[openfeelz] No API key in config, attempting to resolve from auth profiles...");
       const resolvedKey = resolveApiKeyFromAuthProfiles(api);
       if (resolvedKey) {
         config.apiKey = resolvedKey;
+        console.log("[openfeelz] Successfully resolved API key from auth profiles");
+      } else {
+        console.warn("[openfeelz] Failed to resolve API key from auth profiles");
       }
+    } else {
+      console.log("[openfeelz] Using API key from config");
     }
 
     const cfg = api.config;
@@ -153,9 +192,16 @@ const emotionEnginePlugin = {
       return result;
     });
 
-    const agentEndHandler = createAgentEndHook(getManager, config);
+    // Set up classification log path
+    const classificationLogPath = path.join(
+      resolveAgentWorkspaceDir(cfg, "main"),
+      "openfeelz-classifications.jsonl"
+    );
+
+    const agentEndHandler = createAgentEndHook(getManager, config, classificationLogPath);
     api.on("agent_end", async (event: any) => {
       const agentId = event.agentId ?? "main";
+      console.log("[openfeelz] agent_end hook fired for agent:", agentId);
       await agentEndHandler({
         success: event.success ?? true,
         messages: event.messages ?? [],

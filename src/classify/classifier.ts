@@ -12,6 +12,9 @@
  * Falls back to neutral on any failure (no hard crashes in classification).
  */
 
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
 import type { ClassificationResult } from "../types.js";
 
 /** Options for the classifyEmotion function. */
@@ -34,6 +37,8 @@ export interface ClassifyOptions {
   timeoutMs?: number;
   /** Injectable fetch function (for testing). */
   fetchFn?: typeof fetch;
+  /** Path to classification log file (JSONL). */
+  classificationLogPath?: string;
 }
 
 const NEUTRAL_RESULT: ClassificationResult = {
@@ -45,6 +50,54 @@ const NEUTRAL_RESULT: ClassificationResult = {
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
+
+// Reasoning models that don't support custom temperature
+const REASONING_MODELS = ["gpt-5", "gpt-4o-mini", "o1", "o3"];
+
+/**
+ * Check if a model is a reasoning model that doesn't support custom temperature.
+ */
+function isReasoningModel(model: string): boolean {
+  const lower = model.toLowerCase();
+  return REASONING_MODELS.some(prefix => lower.includes(prefix));
+}
+
+/**
+ * Log a classification attempt to JSONL file.
+ */
+function logClassification(
+  logPath: string | undefined,
+  data: {
+    timestamp: string;
+    role: string;
+    text: string;
+    model: string;
+    provider: string;
+    result?: ClassificationResult;
+    success: boolean;
+    error?: string;
+    responseTimeMs?: number;
+  }
+): void {
+  if (!logPath) return;
+
+  try {
+    const logDir = path.dirname(logPath);
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true });
+    }
+
+    const entry = {
+      ...data,
+      textExcerpt: data.text.slice(0, 200) + (data.text.length > 200 ? "..." : ""),
+    };
+    delete (entry as any).text; // Don't log full text for privacy
+
+    fs.appendFileSync(logPath, JSON.stringify(entry) + "\n", "utf8");
+  } catch (err) {
+    console.error("[openfeelz] Failed to write classification log:", err);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Provider Detection
@@ -175,41 +228,103 @@ export async function classifyEmotion(
 ): Promise<ClassificationResult> {
   const fetchFn = options.fetchFn ?? fetch;
   const timeoutMs = options.timeoutMs ?? 10000;
+  const startTime = Date.now();
+  const timestamp = new Date().toISOString();
 
   try {
     if (options.classifierUrl) {
-      return await classifyViaEndpoint(text, role, options.classifierUrl, fetchFn, timeoutMs, options.emotionLabels, options.confidenceMin);
+      const result = await classifyViaEndpoint(
+        text, role, options.classifierUrl, fetchFn, timeoutMs,
+        options.emotionLabels, options.confidenceMin
+      );
+
+      logClassification(options.classificationLogPath, {
+        timestamp,
+        role,
+        text,
+        model: "external",
+        provider: "endpoint",
+        result,
+        success: true,
+        responseTimeMs: Date.now() - startTime,
+      });
+
+      return result;
     }
 
     if (!options.apiKey) {
-      throw new Error(
-        "Emotion classifier requires either classifierUrl or apiKey. " +
-        "Configure apiKey or set ANTHROPIC_API_KEY / OPENAI_API_KEY in the openfeelz plugin config.",
-      );
+      const error = "Emotion classifier requires either classifierUrl or apiKey. " +
+        "Configure apiKey or set ANTHROPIC_API_KEY / OPENAI_API_KEY in environment or auth-profiles.json.";
+
+      console.error(`[openfeelz] ${error}`);
+
+      logClassification(options.classificationLogPath, {
+        timestamp,
+        role,
+        text,
+        model: options.model ?? "unknown",
+        provider: "unknown",
+        success: false,
+        error,
+      });
+
+      throw new Error(error);
     }
 
     const model = options.model ?? "claude-sonnet-4-5-20250514";
     const provider = options.provider ?? detectProvider(model);
 
+    console.log(`[openfeelz] Classifying ${role} emotion with ${provider}/${model}`);
+
+    let result: ClassificationResult;
+
     if (provider === "anthropic") {
-      return await classifyViaAnthropic(
+      result = await classifyViaAnthropic(
         text, role, options.apiKey, model, fetchFn, timeoutMs,
+        options.emotionLabels, options.confidenceMin,
+      );
+    } else {
+      result = await classifyViaOpenAI(
+        text, role, options.apiKey,
+        options.baseUrl ?? "https://api.openai.com/v1",
+        model, fetchFn, timeoutMs,
         options.emotionLabels, options.confidenceMin,
       );
     }
 
-    return await classifyViaOpenAI(
-      text, role, options.apiKey,
-      options.baseUrl ?? "https://api.openai.com/v1",
-      model, fetchFn, timeoutMs,
-      options.emotionLabels, options.confidenceMin,
-    );
+    logClassification(options.classificationLogPath, {
+      timestamp,
+      role,
+      text,
+      model,
+      provider,
+      result,
+      success: true,
+      responseTimeMs: Date.now() - startTime,
+    });
+
+    return result;
   } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+
     // If it's a configuration error (no apiKey), rethrow
     if (err instanceof Error && err.message.includes("requires either")) {
       throw err;
     }
+
     console.error("[openfeelz] Classification failed:", err);
+
+    logClassification(options.classificationLogPath, {
+      timestamp,
+      role,
+      text,
+      model: options.model ?? "unknown",
+      provider: options.provider ?? "unknown",
+      success: false,
+      error: errorMessage,
+      responseTimeMs: Date.now() - startTime,
+    });
+
     return { ...NEUTRAL_RESULT };
   }
 }
@@ -280,8 +395,8 @@ async function classifyViaAnthropic(
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    console.error("[openfeelz] Anthropic classification API error:", response.status, body.slice(0, 500));
-    throw new Error(`Anthropic returned ${response.status}: ${body}`);
+    console.error("[openfeelz] Anthropic classification API error:", response.status, body.slice(0, 800));
+    throw new Error(`Anthropic returned ${response.status}: ${body.slice(0, 200)}`);
   }
 
   const data = (await response.json()) as {
@@ -315,6 +430,23 @@ async function classifyViaOpenAI(
 ): Promise<ClassificationResult> {
   const prompt = buildClassifierPrompt(text, role, labels);
 
+  // Reasoning models (gpt-5-mini, gpt-4o-mini, o1, o3) don't support custom temperature
+  const isReasoning = isReasoningModel(model);
+  const requestBody: any = {
+    model,
+    messages: [
+      { role: "system", content: buildSystemInstruction() },
+      { role: "user", content: prompt },
+    ],
+    response_format: { type: "json_object" },
+    max_completion_tokens: 1000, // reasoning models need headroom
+  };
+
+  // Only set temperature for non-reasoning models
+  if (!isReasoning) {
+    requestBody.temperature = 0.2;
+  }
+
   const response = await fetchFn(
     `${baseUrl.replace(/\/$/, "")}/chat/completions`,
     {
@@ -323,24 +455,15 @@ async function classifyViaOpenAI(
         "content-type": "application/json",
         authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: buildSystemInstruction() },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.2,
-        response_format: { type: "json_object" },
-        max_completion_tokens: 1000, // reasoning models (e.g. gpt-5-mini) need headroom
-      }),
+      body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(timeoutMs),
     },
   );
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    console.error("[openfeelz] OpenAI classification API error:", response.status, body.slice(0, 500));
-    throw new Error(`OpenAI returned ${response.status}`);
+    console.error("[openfeelz] OpenAI classification API error:", response.status, body.slice(0, 800));
+    throw new Error(`OpenAI returned ${response.status}: ${body.slice(0, 200)}`);
   }
 
   const data = (await response.json()) as {
