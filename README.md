@@ -37,7 +37,7 @@ openclaw plugins install openfeelz
 openclaw plugins enable openfeelz
 ```
 
-Restart the gateway after installing. To pin a version: `openclaw plugins install openfeelz@0.9.4`. To install from a local clone (e.g. for development), run `npm run build` in the repo first, then `openclaw plugins install /path/to/openfeelz`.
+Restart the gateway after installing. To pin a version: `openclaw plugins install openfeelz@1.1.0`. To install from a local clone (e.g. for development), run `npm run build` in the repo first, then `openclaw plugins install /path/to/openfeelz`.
 
 When using **reasoning models** (e.g. gpt-5-mini, o1, o3), the classifier omits custom temperature so the API accepts the request. Optional classification logging can be enabled via config (see `docs/OPENFEELZ-FIX-COMPLETE.md`).
 

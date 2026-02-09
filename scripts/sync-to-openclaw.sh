@@ -18,6 +18,6 @@ mkdir -p "$DEST"
 rsync -a --delete "$REPO_ROOT/dist/" "$DEST/dist/"
 cp "$REPO_ROOT/package.json" "$REPO_ROOT/openclaw.plugin.json" "$REPO_ROOT/README.md" "$REPO_ROOT/LICENSE" "$DEST/"
 
-echo "Done. Check version: openclaw emotion -V  (expect 0.9.6+; then wizard should appear in openclaw emotion --help)"
+echo "Done. Check version: openclaw emotion -V  (expect 1.1.0+; then wizard should appear in openclaw emotion --help)"
 echo "  If you use OPENCLAW_STATE_DIR, sync there instead: $0 \"\$OPENCLAW_STATE_DIR/extensions/openfeelz\""
 echo "  (Restart gateway if it was running and you need plugins reloaded.)"
