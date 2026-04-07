@@ -178,33 +178,6 @@ export interface EmotionBucket {
 }
 
 // ---------------------------------------------------------------------------
-// Cached LLM Analysis
-// ---------------------------------------------------------------------------
-
-/** Cached personality analysis from background LLM job. */
-export interface CachedPersonalityAnalysis {
-  summary: string;
-  generatedAt: string;
-  pad: { pleasure: number; arousal: number; dominance: number };
-  extensions: { connection: number; curiosity: number; energy: number; trust: number };
-  ocean: { openness: number; conscientiousness: number; extraversion: number; agreeableness: number; neuroticism: number };
-}
-
-/** Cached emotional state description from background LLM job. */
-export interface CachedEmotionalStateDescription {
-  summary: string;
-  generatedAt: string;
-  primary: string;
-  intensity: number;
-  notes: string[];
-}
-
-export interface CachedAnalysis {
-  personality?: CachedPersonalityAnalysis;
-  emotionalState?: CachedEmotionalStateDescription;
-}
-
-// ---------------------------------------------------------------------------
 // Persisted State (v2)
 // ---------------------------------------------------------------------------
 
@@ -239,8 +212,10 @@ export interface EmotionEngineState {
     totalUpdates: number;
     createdAt: string;
   };
-  /** Cached LLM analysis (written by background service). */
-  cachedAnalysis?: CachedAnalysis;
+  /** Conversation turn counter (incremented on each user message). */
+  turnCount: number;
+  /** Turn number at which decay was last applied. */
+  lastDecayTurn: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -277,12 +252,7 @@ export interface EmotionDimensionDelta {
 
 /** Fully resolved configuration for the OpenFeelz plugin. */
 export interface EmotionEngineConfig {
-  apiKey?: string;
-  baseUrl: string;
   model: string;
-  /** Force a specific provider: "anthropic" | "openai". Auto-detected from model name if omitted. */
-  provider?: "anthropic" | "openai";
-  classifierUrl?: string;
   confidenceMin: number;
   halfLifeHours: number;
   trendWindowHours: number;
@@ -290,27 +260,25 @@ export interface EmotionEngineConfig {
   ruminationEnabled: boolean;
   ruminationThreshold: number;
   ruminationMaxStages: number;
-  realtimeClassification: boolean;
   contextEnabled: boolean;
-  /** Include user emotions in context injection (default: false due to classification quality). */
-  includeUserEmotions: boolean;
-  decayServiceEnabled: boolean;
-  decayServiceIntervalMinutes: number;
-  dashboardEnabled: boolean;
-  timezone?: string;
+  /** Enable agent self-emotion tracking (default: true). */
+  agentEmotions: boolean;
+  /** Enable user emotion tracking (default: false). */
+  userEmotions: boolean;
+  /** Run user emotion classification synchronously (default: false). */
+  syncUserClassification: boolean;
   maxOtherAgents: number;
   emotionLabels: string[];
   personality: OCEANProfile;
-  /** Decay speed preset: fast (~1h half-life) or slow (human-like). Custom uses decayRateOverrides. */
-  decayPreset: "fast" | "slow" | "custom";
+  /** Decay speed preset: fast (~1h half-life), slow (human-like), or turn (per-turn decay). */
+  decayPreset: "fast" | "slow" | "turn";
   decayRateOverrides: Partial<Record<DimensionName, number>>;
   dimensionBaselineOverrides: Partial<DimensionalState>;
 }
 
 /** Default configuration values. */
 export const DEFAULT_CONFIG: EmotionEngineConfig = {
-  baseUrl: "https://api.openai.com/v1",
-  model: "claude-sonnet-4-5-20250514",
+  model: "claude-haiku-4-5-20251001",
   confidenceMin: 0.35,
   halfLifeHours: 12,
   trendWindowHours: 24,
@@ -318,12 +286,10 @@ export const DEFAULT_CONFIG: EmotionEngineConfig = {
   ruminationEnabled: true,
   ruminationThreshold: 0.7,
   ruminationMaxStages: 4,
-  realtimeClassification: false,
   contextEnabled: true,
-  includeUserEmotions: false,
-  decayServiceEnabled: false,
-  decayServiceIntervalMinutes: 30,
-  dashboardEnabled: true,
+  agentEmotions: true,
+  userEmotions: false,
+  syncUserClassification: false,
   maxOtherAgents: 3,
   emotionLabels: [
     "neutral",

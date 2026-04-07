@@ -156,17 +156,6 @@ export function formatEmotionBlock(
 
   const lines: string[] = ["<emotion_state>"];
 
-  // Primary emotion (most salient current state)
-  const emotionalState = state.cachedAnalysis?.emotionalState;
-  if (emotionalState?.primary != null) {
-    lines.push("  <!-- Primary emotion (most salient current state) -->");
-    lines.push("  <primary>");
-    lines.push(
-      `    ${emotionalState.primary} (intensity: ${emotionalState.intensity.toFixed(2)})`,
-    );
-    lines.push("  </primary>");
-  }
-
   // OCEAN personality traits (explains baseline tendencies and resting states)
   const personalityTraits = OCEAN_TRAITS.map(
     (t) => `${t}: ${state.personality[t].toFixed(2)}`,

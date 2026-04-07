@@ -40,6 +40,8 @@ export function buildEmptyState(): EmotionEngineState {
       totalUpdates: 0,
       createdAt: now,
     },
+    turnCount: 0,
+    lastDecayTurn: 0,
   };
 }
 

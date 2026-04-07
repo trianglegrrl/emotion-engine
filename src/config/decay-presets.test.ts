@@ -62,10 +62,10 @@ describe("decay-presets", () => {
       expect(dimensionRates.arousal).toBe(state.decayRates.arousal);
     });
 
-    it('treats "custom" like "slow" (state rates + overrides)', () => {
+    it('treats "turn" like "slow" (state rates + overrides)', () => {
       const config = {
         ...DEFAULT_CONFIG,
-        decayPreset: "custom" as const,
+        decayPreset: "turn" as const,
         decayRateOverrides: { curiosity: 0.5 },
       };
       const { dimensionRates } = getEffectiveDecayRates(state, config);

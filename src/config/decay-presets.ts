@@ -1,6 +1,6 @@
 /**
  * Decay presets: AI-fast (~1h half-life) vs human-like (personality-derived).
- * Used when config.decayPreset is "fast" or "slow"; "custom" uses state rates + overrides.
+ * Used when config.decayPreset is "fast" or "slow"; "turn" uses state rates + overrides.
  */
 
 import type {
@@ -15,7 +15,7 @@ import { DIMENSION_NAMES, BASIC_EMOTION_NAMES } from "../types.js";
 const ONE_HOUR_RATE = Math.log(2);
 
 /** Preset identifier for decay speed. */
-export type DecayPresetId = "fast" | "slow" | "custom";
+export type DecayPresetId = "fast" | "slow" | "turn";
 
 /** Dimension decay rates for "fast" preset (~1h half-life for all dimensions). */
 export const DECAY_PRESET_FAST_DIMENSIONS: DecayRates = Object.fromEntries(
@@ -30,7 +30,7 @@ export const DECAY_PRESET_FAST_EMOTIONS: EmotionDecayRates = Object.fromEntries(
 /**
  * Compute effective decay rates from state, config preset, and overrides.
  * - "fast": use fixed ~1h half-life rates.
- * - "slow" or "custom": use personality-derived rates from state, merged with config overrides.
+ * - "slow" or "turn": use personality-derived rates from state, merged with config overrides.
  */
 export function getEffectiveDecayRates(
   state: EmotionEngineState,

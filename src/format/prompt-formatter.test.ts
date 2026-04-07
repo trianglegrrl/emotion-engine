@@ -70,40 +70,6 @@ describe("prompt-formatter", () => {
       expect(block).toContain("</personality>");
     });
 
-    it("includes primary emotion when cachedAnalysis.emotionalState exists", () => {
-      const state = buildEmptyState();
-      state.cachedAnalysis = {
-        emotionalState: {
-          summary: "Generally calm.",
-          generatedAt: new Date().toISOString(),
-          primary: "calm",
-          intensity: 0.6,
-          notes: [],
-        },
-      };
-      const block = formatEmotionBlock(state, "user1", "agent1", {
-        maxUserEntries: 3,
-        maxAgentEntries: 2,
-        halfLifeHours: 12,
-        trendWindowHours: 24,
-      });
-      expect(block).toContain("<primary>");
-      expect(block).toContain("calm");
-      expect(block).toContain("intensity: 0.60");
-      expect(block).toContain("</primary>");
-    });
-
-    it("omits primary when no cached analysis", () => {
-      const state = buildEmptyState();
-      const block = formatEmotionBlock(state, "user1", "agent1", {
-        maxUserEntries: 3,
-        maxAgentEntries: 2,
-        halfLifeHours: 12,
-        trendWindowHours: 24,
-      });
-      expect(block).not.toContain("<primary>");
-    });
-
     it("includes basic_emotions when any above threshold", () => {
       const state = buildEmptyState();
       state.basicEmotions.happiness = 0.45;
