@@ -8,3 +8,5 @@ coverage/
 .cursor/
 *.tgz
 .worktrees/
+.env
+.omc
