@@ -7,7 +7,7 @@ allowed-tools: Bash, Read
 Run the OpenFeelz state helper to get the current emotional state:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/dist/src/helpers/state-helper.js query --format full
+node $CLAUDE_PLUGIN_ROOT/dist/src/helpers/state-helper.js query --format full
 ```
 
 Parse the JSON output. If `ok` is true, display the `data` object as a readable summary:

@@ -7,7 +7,7 @@ allowed-tools: Bash
 Show recent emotional stimuli:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/dist/src/helpers/state-helper.js history --limit 20
+node $CLAUDE_PLUGIN_ROOT/dist/src/helpers/state-helper.js history --limit 20
 ```
 
 Display each stimulus with:

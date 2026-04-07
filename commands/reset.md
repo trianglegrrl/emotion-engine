@@ -8,12 +8,12 @@ Reset the emotional state to baseline.
 
 **Reset all dimensions:**
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/dist/src/helpers/state-helper.js reset
+node $CLAUDE_PLUGIN_ROOT/dist/src/helpers/state-helper.js reset
 ```
 
 **Reset specific dimensions** (if the user specifies them):
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/dist/src/helpers/state-helper.js reset --dimensions pleasure,arousal
+node $CLAUDE_PLUGIN_ROOT/dist/src/helpers/state-helper.js reset --dimensions pleasure,arousal
 ```
 
 Valid dimensions: pleasure, arousal, dominance, connection, curiosity, energy, trust.

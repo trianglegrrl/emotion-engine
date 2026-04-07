@@ -23,13 +23,13 @@ Ask the user to pick a number (or "custom" to set traits manually).
 
 For presets, read the preset data:
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/dist/src/helpers/state-helper.js get-personality
+node $CLAUDE_PLUGIN_ROOT/dist/src/helpers/state-helper.js get-personality
 ```
 
 Then set each trait using the preset values. The personality presets are defined in the codebase at `src/config/personality-presets.ts`. Apply each trait:
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/dist/src/helpers/state-helper.js set-personality --trait openness --value <value>
-node ${CLAUDE_PLUGIN_ROOT}/dist/src/helpers/state-helper.js set-personality --trait conscientiousness --value <value>
+node $CLAUDE_PLUGIN_ROOT/dist/src/helpers/state-helper.js set-personality --trait openness --value <value>
+node $CLAUDE_PLUGIN_ROOT/dist/src/helpers/state-helper.js set-personality --trait conscientiousness --value <value>
 # ... etc for all 5 traits
 ```
 

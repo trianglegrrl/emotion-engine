@@ -347,3 +347,49 @@ describe("classifyEmotion", () => {
     expect(result.intensity).toBe(0.8)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Integration tests — real claude -p calls (skipped in CI)
+// ---------------------------------------------------------------------------
+
+describe.skipIf(!process.env.RUN_INTEGRATION)('integration: real claude -p', () => {
+  it('classifies a frustrated message via real claude -p call', async () => {
+    const result = await classifyEmotion('I am SO frustrated with this bug!', {
+      role: 'user',
+      emotionLabels: ['neutral', 'happy', 'frustrated', 'angry', 'sad', 'curious'],
+      confidenceMin: 0.3,
+      model: 'haiku',
+    })
+    expect(result.label).toBe('frustrated')
+    expect(result.intensity).toBeGreaterThan(0.5)
+    expect(result.confidence).toBeGreaterThan(0.5)
+    expect(result.usage).toBeDefined()
+    expect(result.usage?.inputTokens).toBeGreaterThan(0)
+    expect(result.usage?.outputTokens).toBeGreaterThan(0)
+    expect(result.usage?.costUsd).toBeGreaterThan(0)
+    expect(result.usage?.durationMs).toBeGreaterThan(0)
+  }, 30000) // 30s timeout for real API call
+
+  it('classifies an agent calm response', async () => {
+    const result = await classifyEmotion('Let me help you work through this step by step.', {
+      role: 'agent',
+      emotionLabels: ['neutral', 'calm', 'focused', 'happy', 'frustrated'],
+      confidenceMin: 0.3,
+      model: 'haiku',
+    })
+    expect(['calm', 'focused', 'neutral']).toContain(result.label)
+    expect(result.confidence).toBeGreaterThan(0.3)
+    expect(result.usage).toBeDefined()
+  }, 30000)
+
+  it('returns neutral for empty text', async () => {
+    const result = await classifyEmotion('', {
+      role: 'user',
+      emotionLabels: ['neutral', 'happy'],
+      confidenceMin: 0.3,
+      model: 'haiku',
+    })
+    // Empty text should either return neutral or very low confidence
+    expect(result.intensity).toBeLessThanOrEqual(0.5)
+  }, 30000)
+})

@@ -6,12 +6,12 @@ allowed-tools: Bash
 
 **Show current preset:**
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/dist/src/helpers/state-helper.js set-decay --preset current
+node $CLAUDE_PLUGIN_ROOT/dist/src/helpers/state-helper.js set-decay --preset current
 ```
 
 **Change preset:**
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/dist/src/helpers/state-helper.js set-decay --preset <slow|fast|turn>
+node $CLAUDE_PLUGIN_ROOT/dist/src/helpers/state-helper.js set-decay --preset <slow|fast|turn>
 ```
 
 Presets:
