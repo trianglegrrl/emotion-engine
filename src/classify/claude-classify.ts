@@ -5,47 +5,9 @@
  * Falls back to neutral on any failure (no hard crashes in classification).
  */
 
-import { spawn } from "node:child_process"
 import type { ClassificationResult, ClassificationUsage } from "../types.js"
+import { callClaude } from "../utils/claude-cli.js"
 import { buildAgentPrompt, buildUserPrompt } from "./prompts.js"
-
-/**
- * Run a command with stdin input and capture stdout.
- * Uses spawn to pipe input to stdin (execFile doesn't support `input`).
- */
-function spawnWithInput(
-  cmd: string,
-  args: string[],
-  input: string,
-  timeoutMs: number,
-): Promise<{ stdout: string }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, {
-      stdio: ["pipe", "pipe", "pipe"],
-      timeout: timeoutMs,
-    })
-
-    const stdoutChunks: Buffer[] = []
-    const stderrChunks: Buffer[] = []
-
-    child.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk))
-    child.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk))
-
-    child.on("error", reject)
-    child.on("close", (code) => {
-      const stdout = Buffer.concat(stdoutChunks).toString("utf8")
-      if (code !== 0) {
-        const stderr = Buffer.concat(stderrChunks).toString("utf8")
-        reject(new Error(`claude -p exited with code ${code}: ${stderr.slice(0, 200)}`))
-        return
-      }
-      resolve({ stdout })
-    })
-
-    child.stdin.write(input)
-    child.stdin.end()
-  })
-}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -91,40 +53,10 @@ export async function classifyEmotion(
       : buildUserPrompt(text, options.emotionLabels)
 
   try {
-    const { stdout } = await spawnWithInput(
-      "claude",
-      ["-p", "--model", model, "--output-format", "json", "--max-turns", "1"],
-      prompt,
-      timeoutMs,
-    )
-
-    // Parse the outer claude -p JSON response
-    const response = JSON.parse(stdout)
-
-    if (response.is_error || response.type !== "result") {
-      console.error("[openfeelz] claude -p returned error:", response.result)
-      return { ...NEUTRAL_RESULT }
-    }
-
-    // Extract usage from modelUsage
-    const modelEntries = Object.values(response.modelUsage ?? {}) as Array<
-      Record<string, number>
-    >
-    const usage: ClassificationUsage = {
-      inputTokens: modelEntries.reduce(
-        (sum, m) => sum + (m.inputTokens ?? 0),
-        0,
-      ),
-      outputTokens: modelEntries.reduce(
-        (sum, m) => sum + (m.outputTokens ?? 0),
-        0,
-      ),
-      costUsd: response.total_cost_usd ?? 0,
-      durationMs: response.duration_ms ?? 0,
-    }
+    const { result, usage } = await callClaude(prompt, { model, timeoutMs })
 
     // Parse the classification from the result field
-    const parsed = parseClassificationResult(response.result)
+    const parsed = parseClassificationResult(result)
     const coerced = coerceResult(parsed, options.emotionLabels, options.confidenceMin)
 
     return { ...coerced, usage }

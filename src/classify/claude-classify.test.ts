@@ -3,20 +3,19 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { EventEmitter } from "node:events"
-import { Readable, Writable } from "node:stream"
 import { DEFAULT_CONFIG } from "../types.js"
+import type { ClassificationUsage } from "../types.js"
 
 // ---------------------------------------------------------------------------
-// Mock node:child_process spawn
+// Mock the shared claude-cli utility
 // ---------------------------------------------------------------------------
 
-const { mockSpawn } = vi.hoisted(() => ({
-  mockSpawn: vi.fn(),
+const { mockCallClaude } = vi.hoisted(() => ({
+  mockCallClaude: vi.fn(),
 }))
 
-vi.mock("node:child_process", () => ({
-  spawn: mockSpawn,
+vi.mock("../utils/claude-cli.js", () => ({
+  callClaude: mockCallClaude,
 }))
 
 import {
@@ -25,64 +24,22 @@ import {
   coerceResult,
 } from "./claude-classify.js"
 
-/** Create a fake child process that emits stdout data and closes. */
-function createFakeChild(stdout: string, exitCode: number = 0): EventEmitter & {
-  stdin: Writable
-  stdout: Readable
-  stderr: Readable
-} {
-  const child = new EventEmitter() as EventEmitter & {
-    stdin: Writable
-    stdout: Readable
-    stderr: Readable
-  }
-  child.stdin = new Writable({ write(_chunk, _enc, cb) { cb() } })
-  child.stdout = new Readable({ read() {} })
-  child.stderr = new Readable({ read() {} })
-
-  // Push stdout data and close on next tick
-  process.nextTick(() => {
-    child.stdout.push(Buffer.from(stdout))
-    child.stdout.push(null)
-    child.stderr.push(null)
+/** Helper to set up a successful callClaude mock response. */
+function mockCallClaudeSuccess(result: string, usage?: Partial<ClassificationUsage>): void {
+  mockCallClaude.mockResolvedValue({
+    result,
+    usage: {
+      inputTokens: usage?.inputTokens ?? 0,
+      outputTokens: usage?.outputTokens ?? 0,
+      costUsd: usage?.costUsd ?? 0,
+      durationMs: usage?.durationMs ?? 0,
+    },
   })
-
-  // Emit close after streams drain
-  setTimeout(() => {
-    child.emit("close", exitCode)
-  }, 5)
-
-  return child
 }
 
-/** Create a fake child process that emits an error. */
-function createFakeChildError(err: Error): EventEmitter & {
-  stdin: Writable
-  stdout: Readable
-  stderr: Readable
-} {
-  const child = new EventEmitter() as EventEmitter & {
-    stdin: Writable
-    stdout: Readable
-    stderr: Readable
-  }
-  child.stdin = new Writable({ write(_chunk, _enc, cb) { cb() } })
-  child.stdout = new Readable({ read() {} })
-  child.stderr = new Readable({ read() {} })
-
-  process.nextTick(() => {
-    child.emit("error", err)
-  })
-
-  return child
-}
-
-function mockSpawnSuccess(stdout: string): void {
-  mockSpawn.mockReturnValue(createFakeChild(stdout))
-}
-
-function mockSpawnError(err: Error): void {
-  mockSpawn.mockReturnValue(createFakeChildError(err))
+/** Helper to set up a failing callClaude mock. */
+function mockCallClaudeError(err: Error): void {
+  mockCallClaude.mockRejectedValue(err)
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +158,7 @@ describe("coerceResult", () => {
 })
 
 // ---------------------------------------------------------------------------
-// classifyEmotion — integration (mocked spawn)
+// classifyEmotion — integration (mocked callClaude)
 // ---------------------------------------------------------------------------
 
 describe("classifyEmotion", () => {
@@ -211,26 +168,20 @@ describe("classifyEmotion", () => {
   })
 
   it("parses a successful claude -p response with usage", async () => {
-    const claudeResponse = {
-      type: "result",
-      is_error: false,
-      result: JSON.stringify({
+    mockCallClaudeSuccess(
+      JSON.stringify({
         label: "happy",
         intensity: 0.7,
         reason: "positive greeting",
         confidence: 0.9,
       }),
-      modelUsage: {
-        "claude-3-5-haiku-20241022": {
-          inputTokens: 150,
-          outputTokens: 30,
-        },
+      {
+        inputTokens: 150,
+        outputTokens: 30,
+        costUsd: 0.0001,
+        durationMs: 1200,
       },
-      total_cost_usd: 0.0001,
-      duration_ms: 1200,
-    }
-
-    mockSpawnSuccess(JSON.stringify(claudeResponse))
+    )
 
     const result = await classifyEmotion("Hello! Great to see you!", {
       role: "agent",
@@ -251,21 +202,14 @@ describe("classifyEmotion", () => {
   })
 
   it("uses user prompt for role: user", async () => {
-    const claudeResponse = {
-      type: "result",
-      is_error: false,
-      result: JSON.stringify({
+    mockCallClaudeSuccess(
+      JSON.stringify({
         label: "frustrated",
         intensity: 0.6,
         reason: "deployment issues",
         confidence: 0.8,
       }),
-      modelUsage: {},
-      total_cost_usd: 0,
-      duration_ms: 800,
-    }
-
-    mockSpawnSuccess(JSON.stringify(claudeResponse))
+    )
 
     const result = await classifyEmotion("This deployment keeps failing!", {
       role: "user",
@@ -277,15 +221,8 @@ describe("classifyEmotion", () => {
     expect(result.intensity).toBe(0.6)
   })
 
-  it("returns neutral when claude -p returns an error response", async () => {
-    const claudeResponse = {
-      type: "result",
-      is_error: true,
-      result: "Something went wrong",
-      modelUsage: {},
-    }
-
-    mockSpawnSuccess(JSON.stringify(claudeResponse))
+  it("returns neutral when callClaude throws an error", async () => {
+    mockCallClaudeError(new Error("claude -p returned error: Something went wrong"))
 
     const result = await classifyEmotion("test", {
       role: "agent",
@@ -299,7 +236,7 @@ describe("classifyEmotion", () => {
   })
 
   it("returns neutral when spawn emits error", async () => {
-    mockSpawnError(new Error("command not found: claude"))
+    mockCallClaudeError(new Error("command not found: claude"))
 
     const result = await classifyEmotion("test", {
       role: "agent",
@@ -312,8 +249,8 @@ describe("classifyEmotion", () => {
     expect(result.confidence).toBe(0)
   })
 
-  it("returns neutral when stdout is invalid JSON", async () => {
-    mockSpawnSuccess("not valid json at all")
+  it("returns neutral when result is invalid JSON", async () => {
+    mockCallClaudeSuccess("not valid json at all")
 
     const result = await classifyEmotion("test", {
       role: "agent",
@@ -325,17 +262,9 @@ describe("classifyEmotion", () => {
   })
 
   it("handles result with markdown-wrapped JSON", async () => {
-    const claudeResponse = {
-      type: "result",
-      is_error: false,
-      result:
-        '```json\n{"label":"excited","intensity":0.8,"reason":"great news","confidence":0.95}\n```',
-      modelUsage: {},
-      total_cost_usd: 0,
-      duration_ms: 500,
-    }
-
-    mockSpawnSuccess(JSON.stringify(claudeResponse))
+    mockCallClaudeSuccess(
+      '```json\n{"label":"excited","intensity":0.8,"reason":"great news","confidence":0.95}\n```',
+    )
 
     const result = await classifyEmotion("This is amazing news!", {
       role: "user",
