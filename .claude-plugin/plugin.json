@@ -1,0 +1,54 @@
+{
+  "name": "openfeelz",
+  "version": "2.0.0",
+  "description": "Emotional model with personality-influenced decay, rumination, and multi-agent awareness for Claude Code",
+  "author": { "name": "trianglegrrl", "url": "https://github.com/trianglegrrl" },
+  "license": "MIT",
+  "repository": "https://github.com/trianglegrrl/openfeelz",
+  "keywords": ["emotion", "personality", "ocean", "pad", "affective-computing"],
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": {
+    "openfeelz": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/src/mcp/mcp-server.js"],
+      "env": {
+        "OPENFEELZ_DATA_DIR": "${CLAUDE_PLUGIN_DATA}"
+      }
+    }
+  },
+  "commands": "./commands",
+  "userConfig": {
+    "decayPreset": {
+      "type": "string",
+      "title": "Decay Preset",
+      "description": "slow (time-based ~12h half-life), fast (time-based ~1h), or turn (turn-based, ~5 turns to baseline)",
+      "default": "slow",
+      "required": true
+    },
+    "agentEmotions": {
+      "type": "boolean",
+      "title": "Agent Emotional Model",
+      "description": "Enable the agent's own emotional state with PAD dimensions, personality, and decay",
+      "default": true,
+      "required": true
+    },
+    "userEmotions": {
+      "type": "boolean",
+      "title": "User Emotion Classification",
+      "description": "Classify emotions from the user's messages and include in context",
+      "default": false
+    },
+    "syncUserClassification": {
+      "type": "boolean",
+      "title": "Synchronous User Classification",
+      "description": "When user emotions are on: classify synchronously (current-turn, ~1s latency) vs async (one turn behind)",
+      "default": false
+    },
+    "model": {
+      "type": "string",
+      "title": "Classification Model",
+      "description": "Anthropic model for emotion classification",
+      "default": "claude-haiku-4-5-20251001"
+    }
+  }
+}

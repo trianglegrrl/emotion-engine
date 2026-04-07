@@ -1,0 +1,39 @@
+{
+  "SessionStart": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hooks/on-session-start.js",
+          "statusMessage": "Loading emotional state...",
+          "timeout": 5
+        }
+      ]
+    }
+  ],
+  "UserPromptSubmit": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hooks/on-user-prompt.js",
+          "statusMessage": "Reading emotions...",
+          "timeout": 15
+        }
+      ]
+    }
+  ],
+  "Stop": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hooks/on-stop.js",
+          "statusMessage": "Processing emotions...",
+          "timeout": 10,
+          "async": true
+        }
+      ]
+    }
+  ]
+}
