@@ -12,8 +12,12 @@ import path from "node:path";
 import { resolveConfig, type ResolvedConfig } from "../config/resolve-config.js";
 import { StateManager } from "../state/state-manager.js";
 import { classifyEmotion } from "../classify/claude-classify.js";
+import type { ClassifyResult } from "../classify/claude-classify.js";
+import { createDefaultTracker, runProfiling } from "../classify/style-profiler.js";
+import { buildExcerpt } from "../utils/excerpt.js";
 import { formatEmotionBlock, type FormatOptions } from "../format/prompt-formatter.js";
-import type { ClassificationResult, EmotionEngineState } from "../types.js";
+import type { ClassificationResult, ClassificationUsage, EmotionEngineState } from "../types.js";
+import { type StyleProfileConfig, DEFAULT_STYLE_CONFIG } from "../config/style-config.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -85,14 +89,35 @@ function readLastUserMessage(transcriptPath: string): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// Token Usage Helper (immutable)
+// ---------------------------------------------------------------------------
+
+function withTokenUsage(
+  state: EmotionEngineState,
+  usage: ClassificationUsage,
+): EmotionEngineState {
+  return {
+    ...state,
+    tokenUsage: {
+      totalInput: state.tokenUsage.totalInput + usage.inputTokens,
+      totalOutput: state.tokenUsage.totalOutput + usage.outputTokens,
+      totalCostUsd: state.tokenUsage.totalCostUsd + usage.costUsd,
+      classificationCount: state.tokenUsage.classificationCount + 1,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // HookRunner
 // ---------------------------------------------------------------------------
 
 export class HookRunner {
   private readonly config: ResolvedConfig;
+  private readonly styleConfig: StyleProfileConfig;
 
-  constructor(config?: ResolvedConfig) {
+  constructor(config?: ResolvedConfig, styleConfig?: StyleProfileConfig) {
     this.config = config ?? resolveConfig();
+    this.styleConfig = styleConfig ?? DEFAULT_STYLE_CONFIG;
   }
 
   // -----------------------------------------------------------------------
@@ -133,13 +158,16 @@ export class HookRunner {
   private async safeClassify(
     text: string,
     role: "agent" | "user",
-  ): Promise<ClassificationResult | undefined> {
+    styleOptions?: { style?: import("../types.js").UserStyleProfile; maturityThreshold?: number },
+  ): Promise<ClassifyResult | undefined> {
     try {
       return await classifyEmotion(text, {
         model: this.config.model,
         role,
         emotionLabels: this.config.emotionLabels,
         confidenceMin: this.config.confidenceMin,
+        style: styleOptions?.style,
+        maturityThreshold: styleOptions?.maturityThreshold,
       });
     } catch (err) {
       console.error(`[openfeelz] Classification failed for ${role}:`, err);
@@ -219,24 +247,69 @@ export class HookRunner {
       state = sm.applyDecay(state);
       state = sm.advanceRumination(state);
 
+      // Get or create style tracker for this session
+      const sessionId = input.session_id ?? "unknown";
+      const tracker = state.userStyles[sessionId]
+        ? { ...state.userStyles[sessionId], messagesSinceLastProfile: state.userStyles[sessionId].messagesSinceLastProfile + 1 }
+        : { ...createDefaultTracker(), messagesSinceLastProfile: 1 };
+
       // Synchronous user classification
       if (
         this.config.syncUserClassification &&
         this.config.userEmotions &&
         input.user_message
       ) {
-        const result = await this.safeClassify(input.user_message, "user");
+        // Pass style profile if mature
+        const isMature = tracker.profile.sampleSize >= this.styleConfig.profileMaturityThreshold;
+        const styleOptions = isMature
+          ? { style: tracker.profile, maturityThreshold: this.styleConfig.profileMaturityThreshold }
+          : undefined;
+
+        const result = await this.safeClassify(input.user_message, "user", styleOptions);
         if (result) {
-          state = sm.updateUserEmotion(state, input.session_id, result);
+          state = sm.updateUserEmotion(state, sessionId, result);
+
+          // Attach source excerpt to the latest stimulus
+          const excerpt = buildExcerpt(input.user_message, this.styleConfig.excerptTokenLimit);
+          const userBucket = state.users[sessionId];
+          if (userBucket?.latest) {
+            state = {
+              ...state,
+              users: {
+                ...state.users,
+                [sessionId]: {
+                  ...userBucket,
+                  latest: { ...userBucket.latest, sourceExcerpt: excerpt },
+                  history: userBucket.history.map((s, i) =>
+                    i === 0 ? { ...s, sourceExcerpt: excerpt } : s,
+                  ),
+                },
+              },
+            };
+          }
+
+          // Update token usage aggregate
+          if (result.usage) {
+            state = withTokenUsage(state, result.usage);
+          }
         }
       }
+
+      // Save updated tracker
+      state = {
+        ...state,
+        userStyles: {
+          ...state.userStyles,
+          [sessionId]: tracker,
+        },
+      };
 
       await sm.saveState(state);
 
       return this.buildContextResponse(
         "UserPromptSubmit",
         state,
-        input.session_id,
+        sessionId,
         input.agent_id,
       );
     } catch (err) {
@@ -254,6 +327,7 @@ export class HookRunner {
       const sm = this.createStateManager(input.agent_id);
 
       let state = await sm.getState();
+      const sessionId = input.session_id ?? "unknown";
 
       // Classify assistant message
       if (this.config.agentEmotions && input.last_assistant_message) {
@@ -270,6 +344,11 @@ export class HookRunner {
             result.intensity,
             result.reason,
           );
+
+          // Update token usage for agent classification
+          if (result.usage) {
+            state = withTokenUsage(state, result.usage);
+          }
         }
       }
 
@@ -281,10 +360,74 @@ export class HookRunner {
       ) {
         const lastUserMsg = readLastUserMessage(input.transcript_path);
         if (lastUserMsg) {
-          const result = await this.safeClassify(lastUserMsg, "user");
+          // Get or create tracker for style injection
+          const tracker = state.userStyles[sessionId]
+            ? { ...state.userStyles[sessionId] }
+            : createDefaultTracker();
+
+          const isMature = tracker.profile.sampleSize >= this.styleConfig.profileMaturityThreshold;
+          const styleOptions = isMature
+            ? { style: tracker.profile, maturityThreshold: this.styleConfig.profileMaturityThreshold }
+            : undefined;
+
+          const result = await this.safeClassify(lastUserMsg, "user", styleOptions);
           if (result) {
-            state = sm.updateUserEmotion(state, input.session_id, result);
+            state = sm.updateUserEmotion(state, sessionId, result);
+
+            // Attach source excerpt
+            const excerpt = buildExcerpt(lastUserMsg, this.styleConfig.excerptTokenLimit);
+            const userBucket = state.users[sessionId];
+            if (userBucket?.latest) {
+              state = {
+                ...state,
+                users: {
+                  ...state.users,
+                  [sessionId]: {
+                    ...userBucket,
+                    latest: { ...userBucket.latest, sourceExcerpt: excerpt },
+                    history: userBucket.history.map((s, i) =>
+                      i === 0 ? { ...s, sourceExcerpt: excerpt } : s,
+                    ),
+                  },
+                },
+              };
+            }
+
+            // Update token usage for user classification
+            if (result.usage) {
+              state = withTokenUsage(state, result.usage);
+            }
           }
+        }
+      }
+
+      // Check if profiling should trigger
+      const tracker = state.userStyles[sessionId];
+      if (tracker && tracker.messagesSinceLastProfile >= this.styleConfig.profilingInterval) {
+        const userHistory = state.users[sessionId]?.history ?? [];
+        try {
+          const { profile, usage } = await runProfiling(
+            userHistory,
+            tracker.profile,
+            this.styleConfig,
+            this.config.model,
+          );
+          state = {
+            ...state,
+            userStyles: {
+              ...state.userStyles,
+              [sessionId]: {
+                ...tracker,
+                profile,
+                messagesSinceLastProfile: 0,
+              },
+            },
+          };
+          if (usage) {
+            state = withTokenUsage(state, usage);
+          }
+        } catch (err) {
+          console.error("[openfeelz] Style profiling failed:", err);
         }
       }
 

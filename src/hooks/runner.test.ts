@@ -4,9 +4,11 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ResolvedConfig } from "../config/resolve-config.js";
-import type { EmotionEngineState, ClassificationResult } from "../types.js";
-import { DEFAULT_CONFIG } from "../types.js";
+import type { EmotionEngineState, ClassificationResult, UserStyleProfile, UserStyleTracker } from "../types.js";
+import { DEFAULT_CONFIG, DEFAULT_STYLE_PROFILE } from "../types.js";
 import { buildEmptyState } from "../state/state-file.js";
+import type { StyleProfileConfig } from "../config/style-config.js";
+import { DEFAULT_STYLE_CONFIG } from "../config/style-config.js";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -15,6 +17,14 @@ import { buildEmptyState } from "../state/state-file.js";
 vi.mock("../classify/claude-classify.js", () => ({
   classifyEmotion: vi.fn(),
 }));
+
+vi.mock("../classify/style-profiler.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../classify/style-profiler.js")>();
+  return {
+    ...actual,
+    runProfiling: vi.fn(),
+  };
+});
 
 vi.mock("../state/state-file.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../state/state-file.js")>();
@@ -28,10 +38,12 @@ vi.mock("../state/state-file.js", async (importOriginal) => {
 });
 
 import { classifyEmotion } from "../classify/claude-classify.js";
+import { runProfiling } from "../classify/style-profiler.js";
 import { readStateFile, writeStateFile } from "../state/state-file.js";
 import { HookRunner } from "./runner.js";
 
 const mockClassify = vi.mocked(classifyEmotion);
+const mockRunProfiling = vi.mocked(runProfiling);
 const mockReadState = vi.mocked(readStateFile);
 const mockWriteState = vi.mocked(writeStateFile);
 
@@ -44,13 +56,40 @@ function makeConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
 }
 
 function makeClassificationResult(
-  overrides: Partial<ClassificationResult> = {},
-): ClassificationResult {
+  overrides: Partial<ClassificationResult & { usage?: import("../types.js").ClassificationUsage }> = {},
+): ClassificationResult & { usage?: import("../types.js").ClassificationUsage } {
   return {
     label: "joy",
     intensity: 0.7,
     reason: "user expressed happiness",
     confidence: 0.9,
+    ...overrides,
+  };
+}
+
+function makeMatureStyleProfile(overrides: Partial<UserStyleProfile> = {}): UserStyleProfile {
+  return {
+    ...DEFAULT_STYLE_PROFILE,
+    sampleSize: 20, // above default maturity threshold of 10
+    lastUpdated: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+function makeTracker(overrides: Partial<UserStyleTracker> = {}): UserStyleTracker {
+  return {
+    profile: { ...DEFAULT_STYLE_PROFILE, lastUpdated: new Date().toISOString() },
+    messagesSinceLastProfile: 0,
+    ...overrides,
+  };
+}
+
+function makeUsage(overrides: Partial<import("../types.js").ClassificationUsage> = {}): import("../types.js").ClassificationUsage {
+  return {
+    inputTokens: 100,
+    outputTokens: 50,
+    costUsd: 0.001,
+    durationMs: 200,
     ...overrides,
   };
 }
@@ -271,5 +310,226 @@ describe("HookRunner", () => {
     expect(mockReadState).toHaveBeenCalledWith(
       expect.stringContaining("agents/task-agent-42.json"),
     );
+  });
+
+  // -------------------------------------------------------------------------
+  // Style Profiling & Token Tracking
+  // -------------------------------------------------------------------------
+
+  describe("style profiling integration", () => {
+    it("handleUserPrompt increments messagesSinceLastProfile", async () => {
+      const config = makeConfig({ syncUserClassification: false, userEmotions: false });
+      const runner = new HookRunner(config);
+
+      const initialState = buildEmptyState();
+      mockReadState.mockResolvedValue(initialState);
+
+      await runner.handleUserPrompt({
+        session_id: "sess-style-1",
+        user_message: "hello",
+      });
+
+      expect(mockWriteState).toHaveBeenCalled();
+      const savedState = mockWriteState.mock.calls[0][1] as EmotionEngineState;
+      expect(savedState.userStyles["sess-style-1"]).toBeDefined();
+      expect(savedState.userStyles["sess-style-1"].messagesSinceLastProfile).toBe(1);
+    });
+
+    it("handleUserPrompt passes style profile to classification when mature", async () => {
+      const config = makeConfig({
+        syncUserClassification: true,
+        userEmotions: true,
+      });
+      const styleConfig: StyleProfileConfig = { ...DEFAULT_STYLE_CONFIG, profileMaturityThreshold: 5 };
+      const runner = new HookRunner(config, styleConfig);
+
+      const matureProfile = makeMatureStyleProfile({ sampleSize: 10 });
+      const initialState = buildEmptyState();
+      const stateWithTracker: EmotionEngineState = {
+        ...initialState,
+        userStyles: {
+          "sess-style-2": {
+            profile: matureProfile,
+            messagesSinceLastProfile: 3,
+          },
+        },
+      };
+      mockReadState.mockResolvedValue(stateWithTracker);
+      mockClassify.mockResolvedValue(makeClassificationResult());
+
+      await runner.handleUserPrompt({
+        session_id: "sess-style-2",
+        user_message: "I love this feature!",
+      });
+
+      expect(mockClassify).toHaveBeenCalledWith(
+        "I love this feature!",
+        expect.objectContaining({
+          role: "user",
+          style: matureProfile,
+          maturityThreshold: 5,
+        }),
+      );
+    });
+
+    it("handleUserPrompt does NOT pass style when immature", async () => {
+      const config = makeConfig({
+        syncUserClassification: true,
+        userEmotions: true,
+      });
+      const runner = new HookRunner(config);
+
+      const immatureProfile = { ...DEFAULT_STYLE_PROFILE, sampleSize: 2, lastUpdated: new Date().toISOString() };
+      const initialState = buildEmptyState();
+      const stateWithTracker: EmotionEngineState = {
+        ...initialState,
+        userStyles: {
+          "sess-style-3": {
+            profile: immatureProfile,
+            messagesSinceLastProfile: 1,
+          },
+        },
+      };
+      mockReadState.mockResolvedValue(stateWithTracker);
+      mockClassify.mockResolvedValue(makeClassificationResult());
+
+      await runner.handleUserPrompt({
+        session_id: "sess-style-3",
+        user_message: "testing",
+      });
+
+      expect(mockClassify).toHaveBeenCalledWith(
+        "testing",
+        expect.not.objectContaining({ style: expect.anything() }),
+      );
+    });
+
+    it("handleUserPrompt stores sourceExcerpt on stimulus", async () => {
+      const config = makeConfig({
+        syncUserClassification: true,
+        userEmotions: true,
+      });
+      const runner = new HookRunner(config);
+
+      mockClassify.mockResolvedValue(makeClassificationResult());
+
+      await runner.handleUserPrompt({
+        session_id: "sess-excerpt",
+        user_message: "I am so happy today!",
+      });
+
+      expect(mockWriteState).toHaveBeenCalled();
+      const savedState = mockWriteState.mock.calls[0][1] as EmotionEngineState;
+      const userBucket = savedState.users["sess-excerpt"];
+      expect(userBucket).toBeDefined();
+      expect(userBucket.latest?.sourceExcerpt).toBe("I am so happy today!");
+      expect(userBucket.history[0]?.sourceExcerpt).toBe("I am so happy today!");
+    });
+
+    it("handleUserPrompt updates tokenUsage aggregate", async () => {
+      const config = makeConfig({
+        syncUserClassification: true,
+        userEmotions: true,
+      });
+      const runner = new HookRunner(config);
+
+      const usage = makeUsage();
+      mockClassify.mockResolvedValue(makeClassificationResult({ usage }));
+
+      await runner.handleUserPrompt({
+        session_id: "sess-tokens",
+        user_message: "hello world",
+      });
+
+      expect(mockWriteState).toHaveBeenCalled();
+      const savedState = mockWriteState.mock.calls[0][1] as EmotionEngineState;
+      expect(savedState.tokenUsage.totalInput).toBe(100);
+      expect(savedState.tokenUsage.totalOutput).toBe(50);
+      expect(savedState.tokenUsage.totalCostUsd).toBeCloseTo(0.001);
+      expect(savedState.tokenUsage.classificationCount).toBe(1);
+    });
+
+    it("handleStop triggers profiling after profilingInterval messages", async () => {
+      const config = makeConfig({ agentEmotions: false });
+      const styleConfig: StyleProfileConfig = { ...DEFAULT_STYLE_CONFIG, profilingInterval: 5 };
+      const runner = new HookRunner(config, styleConfig);
+
+      const tracker = makeTracker({ messagesSinceLastProfile: 5 });
+      const initialState: EmotionEngineState = {
+        ...buildEmptyState(),
+        userStyles: { "sess-prof": tracker },
+      };
+      mockReadState.mockResolvedValue(initialState);
+
+      const profiledProfile = makeMatureStyleProfile({ sampleSize: 5 });
+      const profilingUsage = makeUsage({ inputTokens: 200, outputTokens: 100, costUsd: 0.002 });
+      mockRunProfiling.mockResolvedValue({ profile: profiledProfile, usage: profilingUsage });
+
+      await runner.handleStop({
+        session_id: "sess-prof",
+      });
+
+      expect(mockRunProfiling).toHaveBeenCalledWith(
+        expect.any(Array),
+        tracker.profile,
+        styleConfig,
+        config.model,
+      );
+    });
+
+    it("handleStop resets messagesSinceLastProfile after profiling", async () => {
+      const config = makeConfig({ agentEmotions: false });
+      const styleConfig: StyleProfileConfig = { ...DEFAULT_STYLE_CONFIG, profilingInterval: 5 };
+      const runner = new HookRunner(config, styleConfig);
+
+      const tracker = makeTracker({ messagesSinceLastProfile: 7 });
+      const initialState: EmotionEngineState = {
+        ...buildEmptyState(),
+        userStyles: { "sess-reset": tracker },
+      };
+      mockReadState.mockResolvedValue(initialState);
+
+      const profiledProfile = makeMatureStyleProfile({ sampleSize: 7 });
+      mockRunProfiling.mockResolvedValue({ profile: profiledProfile, usage: makeUsage() });
+
+      await runner.handleStop({
+        session_id: "sess-reset",
+      });
+
+      expect(mockWriteState).toHaveBeenCalled();
+      const savedState = mockWriteState.mock.calls[0][1] as EmotionEngineState;
+      expect(savedState.userStyles["sess-reset"].messagesSinceLastProfile).toBe(0);
+      expect(savedState.userStyles["sess-reset"].profile).toEqual(profiledProfile);
+    });
+
+    it("handleStop updates tokenUsage for profiling call", async () => {
+      const config = makeConfig({ agentEmotions: false });
+      const styleConfig: StyleProfileConfig = { ...DEFAULT_STYLE_CONFIG, profilingInterval: 3 };
+      const runner = new HookRunner(config, styleConfig);
+
+      const tracker = makeTracker({ messagesSinceLastProfile: 3 });
+      const initialState: EmotionEngineState = {
+        ...buildEmptyState(),
+        userStyles: { "sess-prof-tokens": tracker },
+      };
+      mockReadState.mockResolvedValue(initialState);
+
+      const profilingUsage = makeUsage({ inputTokens: 300, outputTokens: 150, costUsd: 0.003 });
+      mockRunProfiling.mockResolvedValue({
+        profile: makeMatureStyleProfile(),
+        usage: profilingUsage,
+      });
+
+      await runner.handleStop({
+        session_id: "sess-prof-tokens",
+      });
+
+      expect(mockWriteState).toHaveBeenCalled();
+      const savedState = mockWriteState.mock.calls[0][1] as EmotionEngineState;
+      expect(savedState.tokenUsage.totalInput).toBe(300);
+      expect(savedState.tokenUsage.totalOutput).toBe(150);
+      expect(savedState.tokenUsage.totalCostUsd).toBeCloseTo(0.003);
+      expect(savedState.tokenUsage.classificationCount).toBe(1);
+    });
   });
 });

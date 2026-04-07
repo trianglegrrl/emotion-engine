@@ -5,7 +5,7 @@
  * Falls back to neutral on any failure (no hard crashes in classification).
  */
 
-import type { ClassificationResult, ClassificationUsage } from "../types.js"
+import type { ClassificationResult, ClassificationUsage, UserStyleProfile } from "../types.js"
 import { callClaude } from "../utils/claude-cli.js"
 import { buildAgentPrompt, buildUserPrompt } from "./prompts.js"
 
@@ -19,6 +19,10 @@ export interface ClassifyOptions {
   confidenceMin: number
   model?: string
   timeoutMs?: number
+  /** User style profile for calibrating classification (user role only). */
+  style?: UserStyleProfile
+  /** Minimum sample size before style profile is used. */
+  maturityThreshold?: number
 }
 
 export interface ClassifyResult extends ClassificationResult {
@@ -50,7 +54,7 @@ export async function classifyEmotion(
   const prompt =
     options.role === "agent"
       ? buildAgentPrompt(text, options.emotionLabels)
-      : buildUserPrompt(text, options.emotionLabels)
+      : buildUserPrompt(text, options.emotionLabels, options.style, options.maturityThreshold)
 
   try {
     const { result, usage } = await callClaude(prompt, { model, timeoutMs })
