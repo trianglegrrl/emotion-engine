@@ -110,6 +110,7 @@ interface FullQueryData {
   readonly overallIntensity: number;
   readonly recentStimuli: readonly EmotionStimulus[];
   readonly rumination: EmotionEngineState["rumination"];
+  readonly tokenUsage?: EmotionEngineState["tokenUsage"];
 }
 
 interface SummaryQueryData {
@@ -147,6 +148,7 @@ export async function queryState(
         overallIntensity,
         recentStimuli: state.recentStimuli,
         rumination: state.rumination,
+        tokenUsage: state.tokenUsage,
       });
 
     case "summary":
