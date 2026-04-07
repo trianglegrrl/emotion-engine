@@ -12,7 +12,7 @@ import { buildEmptyState } from "../state/state-file.js";
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock("../classify/classifier.js", () => ({
+vi.mock("../classify/claude-classify.js", () => ({
   classifyEmotion: vi.fn(),
 }));
 
@@ -27,7 +27,7 @@ vi.mock("../state/state-file.js", async (importOriginal) => {
   };
 });
 
-import { classifyEmotion } from "../classify/classifier.js";
+import { classifyEmotion } from "../classify/claude-classify.js";
 import { readStateFile, writeStateFile } from "../state/state-file.js";
 import { HookRunner } from "./runner.js";
 
@@ -38,7 +38,6 @@ const mockWriteState = vi.mocked(writeStateFile);
 function makeConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
   return {
     ...DEFAULT_CONFIG,
-    apiKey: "test-key",
     dataDir: "/tmp/openfeelz-test",
     ...overrides,
   };

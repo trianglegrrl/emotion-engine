@@ -26,12 +26,6 @@ describe("resolveConfig", () => {
     expect(config.syncUserClassification).toBe(true);
   });
 
-  it("reads ANTHROPIC_API_KEY from env", () => {
-    const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
-    const config = resolveConfig(env);
-    expect(config.apiKey).toBe("sk-ant-test");
-  });
-
   it("resolves data dir from CLAUDE_PLUGIN_DATA", () => {
     const env = { CLAUDE_PLUGIN_DATA: "/tmp/openfeelz-data" };
     const config = resolveConfig(env);

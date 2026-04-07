@@ -2,7 +2,6 @@ import type { EmotionEngineConfig } from "../types.js";
 import { DEFAULT_CONFIG } from "../types.js";
 
 export interface ResolvedConfig extends EmotionEngineConfig {
-  apiKey?: string;
   dataDir: string;
 }
 
@@ -32,7 +31,6 @@ export function resolveConfig(
       env.CLAUDE_PLUGIN_OPTION_SYNCUSERCLASSIFICATION,
       DEFAULT_CONFIG.syncUserClassification,
     ),
-    apiKey: env.ANTHROPIC_API_KEY,
     dataDir:
       env.CLAUDE_PLUGIN_DATA ?? env.OPENFEELZ_DATA_DIR ?? "/tmp/openfeelz",
   };

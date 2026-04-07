@@ -11,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { resolveConfig, type ResolvedConfig } from "../config/resolve-config.js";
 import { StateManager } from "../state/state-manager.js";
-import { classifyEmotion } from "../classify/classifier.js";
+import { classifyEmotion } from "../classify/claude-classify.js";
 import { formatEmotionBlock, type FormatOptions } from "../format/prompt-formatter.js";
 import type { ClassificationResult, EmotionEngineState } from "../types.js";
 
@@ -136,7 +136,6 @@ export class HookRunner {
   ): Promise<ClassificationResult | undefined> {
     try {
       return await classifyEmotion(text, {
-        apiKey: this.config.apiKey,
         model: this.config.model,
         role,
         emotionLabels: this.config.emotionLabels,
