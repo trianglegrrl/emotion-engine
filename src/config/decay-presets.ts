@@ -14,6 +14,10 @@ import { DIMENSION_NAMES, BASIC_EMOTION_NAMES } from "../types.js";
 /** Half-life of 1 hour => rate = ln(2) ≈ 0.693 per hour. */
 const ONE_HOUR_RATE = Math.log(2);
 
+/** Turn-based decay: half-life of 5 conversation turns. */
+export const TURN_HALF_LIFE = 5;
+export const DEFAULT_TURN_RATE = Math.LN2 / TURN_HALF_LIFE;
+
 /** Preset identifier for decay speed. */
 export type DecayPresetId = "fast" | "slow" | "turn";
 
