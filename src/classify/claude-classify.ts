@@ -6,7 +6,7 @@
  */
 
 import { spawn } from "node:child_process"
-import type { ClassificationResult } from "../types.js"
+import type { ClassificationResult, ClassificationUsage } from "../types.js"
 import { buildAgentPrompt, buildUserPrompt } from "./prompts.js"
 
 /**
@@ -50,13 +50,6 @@ function spawnWithInput(
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export interface ClassificationUsage {
-  inputTokens: number
-  outputTokens: number
-  costUsd: number
-  durationMs: number
-}
 
 export interface ClassifyOptions {
   role: "agent" | "user"

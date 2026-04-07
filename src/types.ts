@@ -139,6 +139,10 @@ export interface EmotionStimulus {
   sourceRole: string;
   /** SHA-256 hash of source text (to avoid re-processing). */
   sourceHash?: string;
+  /** Truncated source text excerpt for style profiling. */
+  sourceExcerpt?: string;
+  /** Token usage from the classification call that produced this stimulus. */
+  classificationTokens?: ClassificationUsage;
 }
 
 // ---------------------------------------------------------------------------
@@ -216,7 +220,66 @@ export interface EmotionEngineState {
   turnCount: number;
   /** Turn number at which decay was last applied. */
   lastDecayTurn: number;
+  /** Per-user style profiles and trackers. */
+  userStyles: Record<string, UserStyleTracker>;
+  /** Aggregate token usage across all classification calls. */
+  tokenUsage: TokenUsageAggregate;
 }
+
+// ---------------------------------------------------------------------------
+// User Style Profiling
+// ---------------------------------------------------------------------------
+
+/** Tracked style dimensions for a user's communication patterns. */
+export interface UserStyleProfile {
+  /** Tendency toward exaggeration (0 = understated, 1 = hyperbolic). */
+  hyperboleTendency: number;
+  /** Use of casual profanity (0 = none, 1 = frequent). */
+  casualProfanity: number;
+  /** Emotional expressiveness in text (0 = flat, 1 = very expressive). */
+  emotionalExpressiveness: number;
+  /** Frequency of sarcasm (0 = none, 1 = frequent). */
+  sarcasmFrequency: number;
+  /** Number of messages sampled so far. */
+  sampleSize: number;
+  /** ISO 8601 timestamp of last profile update. */
+  lastUpdated: string;
+  /** User-specified overrides for style dimensions. */
+  userOverrides: string[];
+}
+
+/** Tracks a user's style profile and message counter. */
+export interface UserStyleTracker {
+  profile: UserStyleProfile;
+  messagesSinceLastProfile: number;
+}
+
+/** Aggregate token usage across all classification calls. */
+export interface TokenUsageAggregate {
+  totalInput: number;
+  totalOutput: number;
+  totalCostUsd: number;
+  classificationCount: number;
+}
+
+/** Token usage from a single classification API call. */
+export interface ClassificationUsage {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  durationMs: number;
+}
+
+/** Default style profile for new users. */
+export const DEFAULT_STYLE_PROFILE: UserStyleProfile = {
+  hyperboleTendency: 0.5,
+  casualProfanity: 0.5,
+  emotionalExpressiveness: 0.5,
+  sarcasmFrequency: 0.5,
+  sampleSize: 0,
+  lastUpdated: new Date().toISOString(),
+  userOverrides: [],
+};
 
 // ---------------------------------------------------------------------------
 // Classifier Output
