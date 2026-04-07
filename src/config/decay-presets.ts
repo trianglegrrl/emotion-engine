@@ -34,7 +34,8 @@ export const DECAY_PRESET_FAST_EMOTIONS: EmotionDecayRates = Object.fromEntries(
 /**
  * Compute effective decay rates from state, config preset, and overrides.
  * - "fast": use fixed ~1h half-life rates.
- * - "slow" or "turn": use personality-derived rates from state, merged with config overrides.
+ * - "slow": use personality-derived rates from state, merged with config overrides.
+ * - "turn": use DEFAULT_TURN_RATE with personality modulation (per-turn units).
  */
 export function getEffectiveDecayRates(
   state: EmotionEngineState,
@@ -49,7 +50,42 @@ export function getEffectiveDecayRates(
     };
   }
 
-  // slow or custom: start from state (personality-derived), apply overrides
+  if (preset === "turn") {
+    // Start from DEFAULT_TURN_RATE for all, then apply personality modulation
+    // via the same ratio that personality applies to time-based rates.
+    const dimensionRates = Object.fromEntries(
+      DIMENSION_NAMES.map((name) => {
+        // Personality multiplier: ratio of personality-derived rate to itself at neutral
+        // We use state.decayRates which already has personality modulation baked in.
+        // Scale DEFAULT_TURN_RATE by the ratio of state rate to average state rate.
+        const personalityMultiplier = state.decayRates[name] > 0
+          ? state.decayRates[name] / averageRate(state.decayRates, DIMENSION_NAMES)
+          : 1;
+        return [name, DEFAULT_TURN_RATE * personalityMultiplier];
+      }),
+    ) as DecayRates;
+
+    const emotionDecayRates = Object.fromEntries(
+      BASIC_EMOTION_NAMES.map((name) => {
+        const personalityMultiplier = state.emotionDecayRates[name] > 0
+          ? state.emotionDecayRates[name] / averageRate(state.emotionDecayRates, BASIC_EMOTION_NAMES)
+          : 1;
+        return [name, DEFAULT_TURN_RATE * personalityMultiplier];
+      }),
+    ) as EmotionDecayRates;
+
+    // Apply overrides
+    const overrides = config.decayRateOverrides ?? {};
+    for (const name of DIMENSION_NAMES) {
+      if (overrides[name] != null) {
+        dimensionRates[name] = overrides[name];
+      }
+    }
+
+    return { dimensionRates, emotionDecayRates };
+  }
+
+  // slow: start from state (personality-derived), apply overrides
   const dimensionRates: DecayRates = { ...state.decayRates };
   const overrides = config.decayRateOverrides ?? {};
   for (const name of DIMENSION_NAMES) {
@@ -62,4 +98,13 @@ export function getEffectiveDecayRates(
     dimensionRates,
     emotionDecayRates: { ...state.emotionDecayRates },
   };
+}
+
+/** Compute average rate across a set of named rates. */
+function averageRate<K extends string>(
+  rates: Record<K, number>,
+  names: readonly K[],
+): number {
+  const sum = names.reduce((acc, name) => acc + rates[name], 0);
+  return sum / names.length || 1;
 }
