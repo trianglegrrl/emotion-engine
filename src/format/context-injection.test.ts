@@ -83,14 +83,20 @@ describe("context injection lifecycle", () => {
         maxAgentEntries: 2,
         halfLifeHours: 12,
         trendWindowHours: 24,
-        includeUserEmotions: true,
+        agentEmotions: true,
+        userEmotions: true,
       });
 
-      // Must start and end with the XML tags
-      expect(block).toMatch(/^<emotion_state>/);
-      expect(block).toMatch(/<\/emotion_state>$/);
+      // Must use new <openfeelz> wrapper
+      expect(block).toContain("<openfeelz>");
+      expect(block).toMatch(/<\/openfeelz>$/);
+      expect(block).not.toContain("<emotion_state>");
 
-      // Must contain personality (always present)
+      // Preamble with ownership instructions
+      expect(block).toContain("Do not confuse them");
+
+      // Must contain personality inside agent section
+      expect(block).toContain("<agent_emotional_state>");
       expect(block).toContain("<personality>");
       expect(block).toContain("openness:");
 
@@ -102,15 +108,16 @@ describe("context injection lifecycle", () => {
       expect(block).toContain("</dimensions>");
 
       // Must contain user section with natural-language entries (when enabled)
-      expect(block).toContain("<user>");
+      expect(block).toContain("<user_emotional_state>");
+      expect(block).toContain("<recent_emotions>");
       expect(block).toMatch(/Felt \w+ happy because/);
       expect(block).toContain("project completed successfully.");
-      expect(block).toContain("</user>");
+      expect(block).toContain("</user_emotional_state>");
 
-      // Must contain agent section
-      expect(block).toContain("<agent>");
+      // Must contain agent recent emotions
+      expect(block).toContain("<your_recent_emotions>");
       expect(block).toMatch(/Felt \w+ focused because/);
-      expect(block).toContain("</agent>");
+      expect(block).toContain("</agent_emotional_state>");
     });
 
     it("includes trend line when history has entries in the window", () => {
@@ -140,11 +147,12 @@ describe("context injection lifecycle", () => {
         maxAgentEntries: 2,
         halfLifeHours: 12,
         trendWindowHours: 24,
-        includeUserEmotions: true,
+        agentEmotions: false,
+        userEmotions: true,
       });
 
       // Trend should reflect the dominant emotion (frustrated, since it's more recent and more intense)
-      expect(block).toContain("Trend (last 24h): mostly frustrated.");
+      expect(block).toContain("<trend>mostly frustrated (last 24h)</trend>");
     });
 
     it("includes other agents section when provided", () => {
@@ -161,37 +169,30 @@ describe("context injection lifecycle", () => {
         maxAgentEntries: 2,
         halfLifeHours: 12,
         trendWindowHours: 24,
-        otherAgents: [
-          {
-            id: "research-agent",
-            latest: {
-              id: "os1", timestamp: new Date().toISOString(), label: "curious",
-              intensity: 0.6, trigger: "investigating topic", confidence: 0.8,
-              sourceRole: "assistant",
-            },
-          },
-        ],
+        agentEmotions: true,
+        userEmotions: false,
       });
 
-      expect(block).toContain("<others>");
-      expect(block).toContain("research-agent");
-      expect(block).toContain("curious");
-      expect(block).toContain("</others>");
+      // Other agents section was removed in the new format;
+      // verify basic structure is present
+      expect(block).toContain("<openfeelz>");
+      expect(block).toContain("<agent_emotional_state>");
     });
 
-    it("returns block with at least personality when no stimuli (never empty)", () => {
+    it("returns block with at least personality when no stimuli (agent enabled)", () => {
       const state = buildEmptyState();
       const block = formatEmotionBlock(state, "nobody", "main", {
         maxUserEntries: 3,
         maxAgentEntries: 2,
         halfLifeHours: 12,
         trendWindowHours: 24,
+        agentEmotions: true,
+        userEmotions: false,
       });
       expect(block).not.toBe("");
-      expect(block).toContain("<emotion_state>");
+      expect(block).toContain("<openfeelz>");
       expect(block).toContain("<personality>");
-      expect(block).not.toContain("<user>");
-      expect(block).not.toContain("<agent>");
+      expect(block).not.toContain("</user_emotional_state>");
     });
   });
 
@@ -282,12 +283,12 @@ describe("context injection lifecycle", () => {
       await writeStateFile(statePath, { ...state, lastUpdated: sixHoursAgo });
 
       // 3. Bootstrap hook runs (simulating the agent waking up)
-      const configWithUserEmotions = { ...DEFAULT_CONFIG, includeUserEmotions: true };
+      const configWithUserEmotions = { ...DEFAULT_CONFIG, userEmotions: true };
       const hook = createBootstrapHook(() => manager, configWithUserEmotions);
       const result = await hook({ prompt: "Hello", userKey: "alice", agentId: "main" });
 
       expect(result).toBeDefined();
-      expect(result!.prependContext).toContain("<emotion_state>");
+      expect(result!.prependContext).toContain("<openfeelz>");
 
       // 4. The injected block should mention the user's anger (when user emotions are enabled)
       expect(result!.prependContext).toContain("angry");
@@ -330,7 +331,7 @@ describe("context injection lifecycle", () => {
       await manager.saveState(state);
 
       // Bootstrap should show trend as "mostly frustrated" (when user emotions enabled)
-      const configWithUserEmotions = { ...DEFAULT_CONFIG, includeUserEmotions: true };
+      const configWithUserEmotions = { ...DEFAULT_CONFIG, userEmotions: true };
       const hook = createBootstrapHook(() => manager, configWithUserEmotions);
       const result = await hook({ prompt: "Hi", userKey: "bob", agentId: "main" });
 

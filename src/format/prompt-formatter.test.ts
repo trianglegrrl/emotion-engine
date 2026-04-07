@@ -55,16 +55,138 @@ describe("prompt-formatter", () => {
   });
 
   describe("formatEmotionBlock", () => {
-    it("includes personality block even when no other data (never empty)", () => {
+    // Default options helper — agent emotions on, user emotions off
+    const defaultOpts = {
+      maxUserEntries: 3,
+      maxAgentEntries: 2,
+      halfLifeHours: 12,
+      trendWindowHours: 24,
+      agentEmotions: true,
+      userEmotions: false,
+    };
+
+    // -------------------------------------------------------------------
+    // New format: <openfeelz> with agent/user subsections
+    // -------------------------------------------------------------------
+
+    it("agent-only mode (default): wraps in <openfeelz>, has <agent_emotional_state>, no <user_emotional_state>", () => {
+      const state = buildEmptyState();
+      state.basicEmotions.happiness = 0.35;
+      const block = formatEmotionBlock(state, "user1", "agent1", {
+        ...defaultOpts,
+        agentEmotions: true,
+        userEmotions: false,
+      });
+      expect(block).toContain("<openfeelz>");
+      expect(block).toContain("</openfeelz>");
+      expect(block).toContain("<agent_emotional_state>");
+      expect(block).toContain("</agent_emotional_state>");
+      // Preamble mentions <user_emotional_state> as instruction text,
+      // but the actual XML closing tag should not be present.
+      expect(block).not.toContain("</user_emotional_state>");
+      expect(block).not.toContain("<emotion_state>");
+    });
+
+    it("user-only mode: has <user_emotional_state>, no <agent_emotional_state> section", () => {
+      const state = buildEmptyState();
+      state.users["user1"] = {
+        history: [makeStimulus({ sourceRole: "user" })],
+        latest: makeStimulus({ sourceRole: "user" }),
+      };
+      const block = formatEmotionBlock(state, "user1", "agent1", {
+        ...defaultOpts,
+        agentEmotions: false,
+        userEmotions: true,
+      });
+      expect(block).toContain("<openfeelz>");
+      expect(block).toContain("<user_emotional_state>");
+      expect(block).toContain("</user_emotional_state>");
+      // The preamble text mentions <agent_emotional_state> as instruction,
+      // but the actual XML section/closing tag should not be present.
+      expect(block).not.toContain("</agent_emotional_state>");
+    });
+
+    it("both enabled: both sections present", () => {
+      const state = buildEmptyState();
+      state.basicEmotions.happiness = 0.35;
+      state.users["user1"] = {
+        history: [makeStimulus({ sourceRole: "user" })],
+        latest: makeStimulus({ sourceRole: "user" }),
+      };
+      state.agents["agent1"] = {
+        history: [makeStimulus({ sourceRole: "assistant", label: "focused" })],
+        latest: makeStimulus({ sourceRole: "assistant", label: "focused" }),
+      };
+      const block = formatEmotionBlock(state, "user1", "agent1", {
+        ...defaultOpts,
+        agentEmotions: true,
+        userEmotions: true,
+      });
+      expect(block).toContain("<agent_emotional_state>");
+      expect(block).toContain("<user_emotional_state>");
+    });
+
+    it("both disabled: returns empty string", () => {
+      const state = buildEmptyState();
+      state.basicEmotions.happiness = 0.35;
+      const block = formatEmotionBlock(state, "user1", "agent1", {
+        ...defaultOpts,
+        agentEmotions: false,
+        userEmotions: false,
+      });
+      expect(block).toBe("");
+    });
+
+    it("preamble text present when block is non-empty", () => {
       const state = buildEmptyState();
       const block = formatEmotionBlock(state, "user1", "agent1", {
-        maxUserEntries: 3,
-        maxAgentEntries: 2,
-        halfLifeHours: 12,
-        trendWindowHours: 24,
+        ...defaultOpts,
+        agentEmotions: true,
       });
-      expect(block).not.toBe("");
-      expect(block).toContain("<emotion_state>");
+      expect(block).toContain("Do not confuse them");
+    });
+
+    it("ownership comments present: YOUR (the AI agent's) and HUMAN USER", () => {
+      const state = buildEmptyState();
+      state.users["user1"] = {
+        history: [makeStimulus({ sourceRole: "user" })],
+        latest: makeStimulus({ sourceRole: "user" }),
+      };
+      const block = formatEmotionBlock(state, "user1", "agent1", {
+        ...defaultOpts,
+        agentEmotions: true,
+        userEmotions: true,
+      });
+      expect(block).toContain("YOUR (the AI agent's)");
+      expect(block).toContain("HUMAN USER");
+    });
+
+    it("no old <emotion_state> tags", () => {
+      const state = buildEmptyState();
+      state.basicEmotions.happiness = 0.35;
+      state.users["user1"] = {
+        history: [makeStimulus({ sourceRole: "user" })],
+        latest: makeStimulus({ sourceRole: "user" }),
+      };
+      const block = formatEmotionBlock(state, "user1", "agent1", {
+        ...defaultOpts,
+        agentEmotions: true,
+        userEmotions: true,
+      });
+      expect(block).not.toContain("<emotion_state>");
+      expect(block).not.toContain("</emotion_state>");
+    });
+
+    // -------------------------------------------------------------------
+    // Agent section contents
+    // -------------------------------------------------------------------
+
+    it("includes personality in agent section", () => {
+      const state = buildEmptyState();
+      const block = formatEmotionBlock(state, "user1", "agent1", {
+        ...defaultOpts,
+        agentEmotions: true,
+      });
       expect(block).toContain("<personality>");
       expect(block).toContain("openness:");
       expect(block).toContain("</personality>");
@@ -75,10 +197,8 @@ describe("prompt-formatter", () => {
       state.basicEmotions.happiness = 0.45;
       state.basicEmotions.anger = 0.12;
       const block = formatEmotionBlock(state, "user1", "agent1", {
-        maxUserEntries: 3,
-        maxAgentEntries: 2,
-        halfLifeHours: 12,
-        trendWindowHours: 24,
+        ...defaultOpts,
+        agentEmotions: true,
       });
       expect(block).toContain("<basic_emotions>");
       expect(block).toContain("happiness: 0.45");
@@ -91,10 +211,8 @@ describe("prompt-formatter", () => {
       state.basicEmotions.happiness = 0.01;
       state.basicEmotions.sadness = 0.005;
       const block = formatEmotionBlock(state, "user1", "agent1", {
-        maxUserEntries: 3,
-        maxAgentEntries: 2,
-        halfLifeHours: 12,
-        trendWindowHours: 24,
+        ...defaultOpts,
+        agentEmotions: true,
       });
       expect(block).not.toContain("<basic_emotions>");
     });
@@ -106,10 +224,8 @@ describe("prompt-formatter", () => {
       state.dimensions.curiosity = 0.8;
       state.baseline.curiosity = 0.5;
       const block = formatEmotionBlock(state, "user1", "agent1", {
-        maxUserEntries: 3,
-        maxAgentEntries: 2,
-        halfLifeHours: 12,
-        trendWindowHours: 24,
+        ...defaultOpts,
+        agentEmotions: true,
       });
       expect(block).toContain("<dimensions>");
       expect(block).toContain("pleasure:");
@@ -119,91 +235,84 @@ describe("prompt-formatter", () => {
       expect(block).toContain("</dimensions>");
     });
 
-    it("includes user emotion entries when includeUserEmotions is true", () => {
-      const state = buildEmptyState();
-      state.users["user1"] = {
-        history: [makeStimulus({ sourceRole: "user" })],
-        latest: makeStimulus({ sourceRole: "user" }),
-      };
-      const block = formatEmotionBlock(state, "user1", "agent1", {
-        maxUserEntries: 3,
-        maxAgentEntries: 2,
-        halfLifeHours: 12,
-        trendWindowHours: 24,
-        includeUserEmotions: true,
-      });
-      expect(block).toContain("<emotion_state>");
-      expect(block).toContain("<user>");
-      expect(block).toContain("happy");
-      expect(block).toContain("</emotion_state>");
-    });
-
-    it("excludes user emotions when includeUserEmotions is false", () => {
-      const state = buildEmptyState();
-      state.users["user1"] = {
-        history: [makeStimulus({ sourceRole: "user" })],
-        latest: makeStimulus({ sourceRole: "user" }),
-      };
-      const block = formatEmotionBlock(state, "user1", "agent1", {
-        maxUserEntries: 3,
-        maxAgentEntries: 2,
-        halfLifeHours: 12,
-        trendWindowHours: 24,
-        includeUserEmotions: false,
-      });
-      expect(block).toContain("<emotion_state>");
-      expect(block).toContain("<personality>");
-      expect(block).not.toContain("<user>");
-      expect(block).not.toContain("happy");
-    });
-
-    it("excludes user emotions when includeUserEmotions is omitted (default off)", () => {
-      const state = buildEmptyState();
-      state.users["user1"] = {
-        history: [makeStimulus({ sourceRole: "user" })],
-        latest: makeStimulus({ sourceRole: "user" }),
-      };
-      const block = formatEmotionBlock(state, "user1", "agent1", {
-        maxUserEntries: 3,
-        maxAgentEntries: 2,
-        halfLifeHours: 12,
-        trendWindowHours: 24,
-      });
-      expect(block).not.toContain("<user>");
-    });
-
-    it("includes agent emotion entries", () => {
+    it("includes agent recent emotions in <your_recent_emotions>", () => {
       const state = buildEmptyState();
       state.agents["agent1"] = {
         history: [makeStimulus({ sourceRole: "assistant", label: "focused" })],
         latest: makeStimulus({ sourceRole: "assistant", label: "focused" }),
       };
       const block = formatEmotionBlock(state, "user1", "agent1", {
-        maxUserEntries: 3,
-        maxAgentEntries: 2,
-        halfLifeHours: 12,
-        trendWindowHours: 24,
+        ...defaultOpts,
+        agentEmotions: true,
       });
-      expect(block).toContain("<agent>");
+      expect(block).toContain("<your_recent_emotions>");
       expect(block).toContain("focused");
+      expect(block).toContain("</your_recent_emotions>");
     });
 
-    it("includes dimensional context when dimensions deviate from baseline", () => {
+    // -------------------------------------------------------------------
+    // User section contents
+    // -------------------------------------------------------------------
+
+    it("includes user recent emotions in <recent_emotions>", () => {
       const state = buildEmptyState();
-      state.dimensions.pleasure = 0.7;
-      state.dimensions.curiosity = 0.9;
       state.users["user1"] = {
-        history: [makeStimulus()],
-        latest: makeStimulus(),
+        history: [makeStimulus({ sourceRole: "user" })],
+        latest: makeStimulus({ sourceRole: "user" }),
       };
       const block = formatEmotionBlock(state, "user1", "agent1", {
-        maxUserEntries: 3,
-        maxAgentEntries: 2,
-        halfLifeHours: 12,
-        trendWindowHours: 24,
+        ...defaultOpts,
+        agentEmotions: false,
+        userEmotions: true,
       });
-      expect(block).toContain("<dimensions>");
+      expect(block).toContain("<recent_emotions>");
+      expect(block).toContain("happy");
+      expect(block).toContain("</recent_emotions>");
     });
+
+    it("includes trend in user section", () => {
+      const now = new Date();
+      const state = buildEmptyState();
+      state.users["user1"] = {
+        history: [
+          makeStimulus({
+            sourceRole: "user",
+            label: "frustrated",
+            intensity: 0.7,
+            timestamp: now.toISOString(),
+          }),
+          makeStimulus({
+            id: "test-2",
+            sourceRole: "user",
+            label: "frustrated",
+            intensity: 0.6,
+            timestamp: new Date(now.getTime() - 3600000).toISOString(),
+          }),
+        ],
+      };
+      const block = formatEmotionBlock(state, "user1", "agent1", {
+        ...defaultOpts,
+        agentEmotions: false,
+        userEmotions: true,
+      });
+      expect(block).toContain("<trend>");
+      expect(block).toContain("mostly frustrated");
+      expect(block).toContain("</trend>");
+    });
+
+    it("user emotions enabled but no user data returns empty string", () => {
+      const state = buildEmptyState();
+      const block = formatEmotionBlock(state, "user1", "agent1", {
+        ...defaultOpts,
+        agentEmotions: false,
+        userEmotions: true,
+      });
+      expect(block).toBe("");
+    });
+
+    // -------------------------------------------------------------------
+    // Edge cases
+    // -------------------------------------------------------------------
 
     it("limits entries to maxUserEntries / maxAgentEntries", () => {
       const state = buildEmptyState();
@@ -213,36 +322,26 @@ describe("prompt-formatter", () => {
         ),
       };
       const block = formatEmotionBlock(state, "user1", "agent1", {
+        ...defaultOpts,
+        agentEmotions: false,
+        userEmotions: true,
         maxUserEntries: 2,
-        maxAgentEntries: 2,
-        halfLifeHours: 12,
-        trendWindowHours: 24,
-        includeUserEmotions: true,
       });
-      // Should only contain 2 user entries (no agent entries in this state)
       const matches = block.match(/Felt /g);
       expect(matches).toBeDefined();
       expect(matches!.length).toBeLessThanOrEqual(2);
     });
 
-    it("includes other agents when provided", () => {
+    it("returns empty string when agentEmotions enabled but nothing to show (no personality is always shown)", () => {
+      // With agentEmotions on, personality is always present, so it should NOT be empty
       const state = buildEmptyState();
-      state.users["user1"] = {
-        history: [makeStimulus()],
-        latest: makeStimulus(),
-      };
       const block = formatEmotionBlock(state, "user1", "agent1", {
-        maxUserEntries: 3,
-        maxAgentEntries: 2,
-        halfLifeHours: 12,
-        trendWindowHours: 24,
-        otherAgents: [
-          { id: "agent2", latest: makeStimulus({ label: "calm" }) },
-        ],
+        ...defaultOpts,
+        agentEmotions: true,
+        userEmotions: false,
       });
-      expect(block).toContain("<others>");
-      expect(block).toContain("agent2");
-      expect(block).toContain("calm");
+      expect(block).not.toBe("");
+      expect(block).toContain("<personality>");
     });
   });
 });

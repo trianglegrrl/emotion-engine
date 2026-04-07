@@ -133,13 +133,27 @@ export interface FormatOptions {
   trendWindowHours: number;
   timeZone?: string;
   otherAgents?: Array<{ id: string; latest: EmotionStimulus }>;
-  /** Include user emotions in context (default: false). */
-  includeUserEmotions?: boolean;
+  /** Show agent emotional state section (default: true). */
+  agentEmotions: boolean;
+  /** Show user emotional state section (default: false). */
+  userEmotions: boolean;
 }
 
+const PREAMBLE =
+  "The following is your emotional context from OpenFeelz. " +
+  "<agent_emotional_state> is YOUR state. " +
+  "<user_emotional_state> is the HUMAN's state. " +
+  "Do not confuse them.";
+
 /**
- * Build the `<emotion_state>` block for system prompt context prepend.
- * Returns an empty string if there's nothing to inject.
+ * Build the `<openfeelz>` block for system prompt context prepend.
+ *
+ * Contains explicit `<agent_emotional_state>` and `<user_emotional_state>`
+ * subsections with ownership comments so the agent never confuses its own
+ * emotions with the user's.
+ *
+ * Returns an empty string when both sections are disabled or when enabled
+ * sections have nothing to show.
  */
 export function formatEmotionBlock(
   state: EmotionEngineState,
@@ -147,25 +161,56 @@ export function formatEmotionBlock(
   agentId: string,
   options: FormatOptions,
 ): string {
-  const now = new Date();
-  const userBucket = state.users[userKey];
+  const agentSection = options.agentEmotions
+    ? buildAgentSection(state, agentId, options)
+    : null;
+
+  const userSection = options.userEmotions
+    ? buildUserSection(state, userKey, options)
+    : null;
+
+  if (agentSection === null && userSection === null) {
+    return "";
+  }
+
+  const lines: string[] = [PREAMBLE, "", "<openfeelz>"];
+
+  if (agentSection !== null) {
+    lines.push(agentSection);
+  }
+  if (userSection !== null) {
+    if (agentSection !== null) lines.push("");
+    lines.push(userSection);
+  }
+
+  lines.push("</openfeelz>");
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Section builders (private)
+// ---------------------------------------------------------------------------
+
+function buildAgentSection(
+  state: EmotionEngineState,
+  agentId: string,
+  options: FormatOptions,
+): string | null {
   const agentBucket = state.agents[agentId];
-  const userEntries = userBucket?.history?.slice(0, options.maxUserEntries) ?? [];
-  const agentEntries = agentBucket?.history?.slice(0, options.maxAgentEntries) ?? [];
-  const otherAgents = options.otherAgents ?? [];
+  const agentEntries =
+    agentBucket?.history?.slice(0, options.maxAgentEntries) ?? [];
 
-  const lines: string[] = ["<emotion_state>"];
+  const inner: string[] = [];
 
-  // OCEAN personality traits (explains baseline tendencies and resting states)
+  // Personality traits
   const personalityTraits = OCEAN_TRAITS.map(
     (t) => `${t}: ${state.personality[t].toFixed(2)}`,
   ).join(", ");
-  lines.push("  <!-- OCEAN personality traits (baseline tendencies) -->");
-  lines.push("  <personality>");
-  lines.push(`    ${personalityTraits}`);
-  lines.push("  </personality>");
+  inner.push("    <personality>");
+  inner.push(`      ${personalityTraits}`);
+  inner.push("    </personality>");
 
-  // Dimensional state (current values vs personality-influenced baselines)
+  // Dimensional deviations
   const dimDeviations: string[] = [];
   for (const name of DIMENSION_NAMES) {
     const val = state.dimensions[name];
@@ -179,81 +224,89 @@ export function formatEmotionBlock(
     }
   }
   if (dimDeviations.length > 0) {
-    lines.push("  <!-- Dimensional state (deviations from baseline) -->");
-    lines.push("  <dimensions>");
+    inner.push("    <dimensions>");
     for (const line of dimDeviations) {
-      lines.push(`    ${line}`);
+      inner.push(`      ${line}`);
     }
-    lines.push("  </dimensions>");
+    inner.push("    </dimensions>");
   }
 
-  // Basic emotions (Ekman's 6, intensities above threshold)
-  const basicEmotionsAboveThreshold = BASIC_EMOTION_NAMES.filter(
+  // Basic emotions
+  const basicAbove = BASIC_EMOTION_NAMES.filter(
     (name) => state.basicEmotions[name] > 0.01,
   );
-  if (basicEmotionsAboveThreshold.length > 0) {
-    lines.push("  <!-- Basic emotions (Ekman, above threshold) -->");
-    lines.push("  <basic_emotions>");
-    for (const name of basicEmotionsAboveThreshold) {
-      lines.push(`    ${name}: ${state.basicEmotions[name].toFixed(2)}`);
+  if (basicAbove.length > 0) {
+    inner.push("    <basic_emotions>");
+    for (const name of basicAbove) {
+      inner.push(`      ${name}: ${state.basicEmotions[name].toFixed(2)}`);
     }
-    lines.push("  </basic_emotions>");
+    inner.push("    </basic_emotions>");
   }
 
-  // User emotions (recent emotional expressions from conversation partner)
-  if (options.includeUserEmotions === true && userEntries.length > 0) {
-    lines.push("  <!-- User emotions (recent partner expressions) -->");
-    lines.push("  <user>");
-    for (const entry of userEntries) {
-      lines.push(`    ${formatEntry(entry, options.timeZone)}`);
-    }
-    const userTrend = computeDominantLabel(
-      userBucket?.history ?? [],
-      now,
-      options.halfLifeHours,
-      options.trendWindowHours,
-    );
-    if (userTrend !== "neutral") {
-      lines.push(
-        `    Trend (last ${options.trendWindowHours}h): mostly ${userTrend}.`,
-      );
-    }
-    lines.push("  </user>");
-  }
-
-  // Agent emotions (self-classified expressions)
+  // Agent recent emotions
   if (agentEntries.length > 0) {
-    lines.push("  <!-- Agent emotions (self-classified) -->");
-    lines.push("  <agent>");
+    inner.push("    <your_recent_emotions>");
     for (const entry of agentEntries) {
-      lines.push(`    ${formatEntry(entry, options.timeZone)}`);
+      inner.push(`      ${formatEntry(entry, options.timeZone)}`);
     }
-    const agentTrend = computeDominantLabel(
-      agentBucket?.history ?? [],
-      now,
-      options.halfLifeHours,
-      options.trendWindowHours,
+    inner.push("    </your_recent_emotions>");
+  }
+
+  // Personality is always present, so agent section is never empty when enabled
+  const lines: string[] = [];
+  lines.push(
+    "  <!-- YOUR (the AI agent's) emotional state. This is YOUR internal state, not the user's. -->",
+  );
+  lines.push("  <agent_emotional_state>");
+  lines.push(...inner);
+  lines.push("  </agent_emotional_state>");
+
+  return lines.join("\n");
+}
+
+function buildUserSection(
+  state: EmotionEngineState,
+  userKey: string,
+  options: FormatOptions,
+): string | null {
+  const now = new Date();
+  const userBucket = state.users[userKey];
+  const userEntries =
+    userBucket?.history?.slice(0, options.maxUserEntries) ?? [];
+
+  if (userEntries.length === 0) {
+    return null;
+  }
+
+  const inner: string[] = [];
+
+  // Recent emotions
+  inner.push("    <recent_emotions>");
+  for (const entry of userEntries) {
+    inner.push(`      ${formatEntry(entry, options.timeZone)}`);
+  }
+  inner.push("    </recent_emotions>");
+
+  // Trend
+  const userTrend = computeDominantLabel(
+    userBucket?.history ?? [],
+    now,
+    options.halfLifeHours,
+    options.trendWindowHours,
+  );
+  if (userTrend !== "neutral") {
+    inner.push(
+      `    <trend>mostly ${userTrend} (last ${options.trendWindowHours}h)</trend>`,
     );
-    if (agentTrend !== "neutral") {
-      lines.push(
-        `    Trend (last ${options.trendWindowHours}h): mostly ${agentTrend}.`,
-      );
-    }
-    lines.push("  </agent>");
   }
 
-  // Other agents (multi-agent contexts)
-  if (otherAgents.length > 0) {
-    lines.push("  <!-- Other agents (multi-agent) -->");
-    lines.push("  <others>");
-    for (const other of otherAgents) {
-      lines.push(
-        `    ${other.id} — ${formatEntry(other.latest, options.timeZone)}`,
-      );
-    }
-    lines.push("  </others>");
-  }
+  const lines: string[] = [];
+  lines.push(
+    "  <!-- The HUMAN USER's emotional state (classified from their messages). This is NOT your emotion. -->",
+  );
+  lines.push("  <user_emotional_state>");
+  lines.push(...inner);
+  lines.push("  </user_emotional_state>");
 
-  lines.push("</emotion_state>");
   return lines.join("\n");
 }
