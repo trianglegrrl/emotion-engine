@@ -17,8 +17,10 @@ import type {
   EmotionStimulus,
   OCEANProfile,
   OCEANTrait,
+  UserStyleProfile,
 } from "../types.js";
-import { DIMENSION_NAMES, OCEAN_TRAITS } from "../types.js";
+import { DIMENSION_NAMES, OCEAN_TRAITS, DEFAULT_STYLE_PROFILE } from "../types.js";
+import { createDefaultTracker } from "../classify/style-profiler.js";
 import {
   computePrimaryEmotion,
   computeOverallIntensity,
@@ -328,6 +330,114 @@ export async function historyAction(
 }
 
 // ---------------------------------------------------------------------------
+// Style profile actions
+// ---------------------------------------------------------------------------
+
+const VALID_STYLE_DIMENSIONS = [
+  "hyperboleTendency",
+  "casualProfanity",
+  "emotionalExpressiveness",
+  "sarcasmFrequency",
+] as const;
+
+type StyleDimensionName = (typeof VALID_STYLE_DIMENSIONS)[number];
+
+/** Get a user's style profile (defaults to DEFAULT_STYLE_PROFILE for unknown users). */
+export async function getStyleAction(
+  manager: StateManager,
+  flags: Readonly<Record<string, string | undefined>>,
+): Promise<ActionResult<{ profile: UserStyleProfile }>> {
+  const user = flags.user ?? "unknown";
+  const state = await loadDecayedState(manager);
+  const profile = state.userStyles[user]?.profile ?? {
+    ...DEFAULT_STYLE_PROFILE,
+    lastUpdated: new Date().toISOString(),
+  };
+  return success({ profile });
+}
+
+/** Set a single style dimension for a user. */
+export async function setStyleAction(
+  manager: StateManager,
+  flags: Readonly<Record<string, string | undefined>>,
+): Promise<ActionResult<{ profile: UserStyleProfile; dimensionSet: string; value: number }>> {
+  const dimension = flags.dimension;
+  const valueStr = flags.value;
+  const user = flags.user ?? "unknown";
+
+  if (!dimension || !VALID_STYLE_DIMENSIONS.includes(dimension as StyleDimensionName)) {
+    return error(
+      `Invalid dimension "${dimension ?? ""}". Valid: ${VALID_STYLE_DIMENSIONS.join(", ")}`,
+      "INVALID_DIMENSION",
+    );
+  }
+
+  if (!valueStr) {
+    return error("Missing --value flag", "MISSING_PARAM");
+  }
+
+  const value = Number(valueStr);
+  if (Number.isNaN(value) || value < 0 || value > 1) {
+    return error(
+      `Invalid value "${valueStr}": must be a number between 0 and 1`,
+      "INVALID_VALUE",
+    );
+  }
+
+  const state = await loadDecayedState(manager);
+  const existing = state.userStyles[user] ?? createDefaultTracker();
+  const existingProfile = existing.profile;
+
+  const updatedOverrides = existingProfile.userOverrides.includes(dimension)
+    ? [...existingProfile.userOverrides]
+    : [...existingProfile.userOverrides, dimension];
+
+  const updatedProfile: UserStyleProfile = {
+    ...existingProfile,
+    [dimension]: value,
+    userOverrides: updatedOverrides,
+    lastUpdated: new Date().toISOString(),
+  };
+
+  const updatedState: EmotionEngineState = {
+    ...state,
+    userStyles: {
+      ...state.userStyles,
+      [user]: { ...existing, profile: updatedProfile },
+    },
+  };
+
+  await manager.saveState(updatedState);
+
+  return success({ profile: updatedProfile, dimensionSet: dimension, value });
+}
+
+/** Reset a user's style profile to defaults. */
+export async function resetStyleAction(
+  manager: StateManager,
+  flags: Readonly<Record<string, string | undefined>>,
+): Promise<ActionResult<{ profile: UserStyleProfile; message: string }>> {
+  const user = flags.user ?? "unknown";
+  const state = await loadDecayedState(manager);
+  const freshTracker = createDefaultTracker();
+
+  const updatedState: EmotionEngineState = {
+    ...state,
+    userStyles: {
+      ...state.userStyles,
+      [user]: freshTracker,
+    },
+  };
+
+  await manager.saveState(updatedState);
+
+  return success({
+    profile: freshTracker.profile,
+    message: "Style profile reset to defaults",
+  });
+}
+
+// ---------------------------------------------------------------------------
 // CLI router
 // ---------------------------------------------------------------------------
 
@@ -344,6 +454,9 @@ const ACTION_MAP: Readonly<Record<string, ActionHandler>> = {
   "set-decay": (_mgr, flags) => setDecayPreset(flags),
   "apply-stimulus": applyStimulusAction,
   history: historyAction,
+  "get-style": getStyleAction,
+  "set-style": setStyleAction,
+  "reset-style": resetStyleAction,
 };
 
 /** Route parsed args to the correct action handler. Exported for testing. */

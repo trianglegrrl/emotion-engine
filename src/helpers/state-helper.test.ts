@@ -21,10 +21,15 @@ import {
   setDecayPreset,
   applyStimulusAction,
   historyAction,
+  getStyleAction,
+  setStyleAction,
+  resetStyleAction,
   parseArgs,
   type SuccessResult,
   type ErrorResult,
 } from "./state-helper.js";
+import { DEFAULT_STYLE_PROFILE } from "../types.js";
+import { createDefaultTracker } from "../classify/style-profiler.js";
 
 function isSuccess<T>(result: SuccessResult<T> | ErrorResult): result is SuccessResult<T> {
   return result.ok === true;
@@ -400,6 +405,145 @@ describe("state-helper", () => {
       expect(isSuccess(result)).toBe(true);
       if (!isSuccess(result)) return;
       expect(result.data.stimuli.length).toBe(20);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // get-style
+  // -------------------------------------------------------------------------
+
+  describe("getStyleAction", () => {
+    it("returns default profile for unknown user", async () => {
+      const result = await getStyleAction(manager, {});
+      expect(isSuccess(result)).toBe(true);
+      if (!isSuccess(result)) return;
+      const profile = result.data.profile;
+      expect(profile.hyperboleTendency).toBe(DEFAULT_STYLE_PROFILE.hyperboleTendency);
+      expect(profile.casualProfanity).toBe(DEFAULT_STYLE_PROFILE.casualProfanity);
+      expect(profile.emotionalExpressiveness).toBe(DEFAULT_STYLE_PROFILE.emotionalExpressiveness);
+      expect(profile.sarcasmFrequency).toBe(DEFAULT_STYLE_PROFILE.sarcasmFrequency);
+    });
+
+    it("returns existing profile after set", async () => {
+      // Set a dimension first
+      await setStyleAction(manager, {
+        dimension: "hyperboleTendency",
+        value: "0.9",
+        user: "alice",
+      });
+
+      const result = await getStyleAction(manager, { user: "alice" });
+      expect(isSuccess(result)).toBe(true);
+      if (!isSuccess(result)) return;
+      expect(result.data.profile.hyperboleTendency).toBe(0.9);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // set-style
+  // -------------------------------------------------------------------------
+
+  describe("setStyleAction", () => {
+    it("sets dimension and adds to userOverrides", async () => {
+      const result = await setStyleAction(manager, {
+        dimension: "casualProfanity",
+        value: "0.8",
+        user: "bob",
+      });
+      expect(isSuccess(result)).toBe(true);
+      if (!isSuccess(result)) return;
+      expect(result.data.profile.casualProfanity).toBe(0.8);
+      expect(result.data.dimensionSet).toBe("casualProfanity");
+      expect(result.data.value).toBe(0.8);
+      expect(result.data.profile.userOverrides).toContain("casualProfanity");
+    });
+
+    it("does not duplicate userOverrides on repeated set", async () => {
+      await setStyleAction(manager, {
+        dimension: "casualProfanity",
+        value: "0.7",
+        user: "bob",
+      });
+      const result = await setStyleAction(manager, {
+        dimension: "casualProfanity",
+        value: "0.8",
+        user: "bob",
+      });
+      expect(isSuccess(result)).toBe(true);
+      if (!isSuccess(result)) return;
+      const overrides = result.data.profile.userOverrides.filter(
+        (o: string) => o === "casualProfanity",
+      );
+      expect(overrides.length).toBe(1);
+    });
+
+    it("rejects invalid dimension name", async () => {
+      const result = await setStyleAction(manager, {
+        dimension: "invalidDimension",
+        value: "0.5",
+      });
+      expect(isError(result)).toBe(true);
+      if (!isError(result)) return;
+      expect(result.code).toBe("INVALID_DIMENSION");
+    });
+
+    it("rejects value outside 0-1 (too high)", async () => {
+      const result = await setStyleAction(manager, {
+        dimension: "hyperboleTendency",
+        value: "1.5",
+      });
+      expect(isError(result)).toBe(true);
+      if (!isError(result)) return;
+      expect(result.code).toBe("INVALID_VALUE");
+    });
+
+    it("rejects value outside 0-1 (negative)", async () => {
+      const result = await setStyleAction(manager, {
+        dimension: "hyperboleTendency",
+        value: "-0.1",
+      });
+      expect(isError(result)).toBe(true);
+      if (!isError(result)) return;
+      expect(result.code).toBe("INVALID_VALUE");
+    });
+
+    it("rejects non-numeric value", async () => {
+      const result = await setStyleAction(manager, {
+        dimension: "hyperboleTendency",
+        value: "abc",
+      });
+      expect(isError(result)).toBe(true);
+      if (!isError(result)) return;
+      expect(result.code).toBe("INVALID_VALUE");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // reset-style
+  // -------------------------------------------------------------------------
+
+  describe("resetStyleAction", () => {
+    it("resets to defaults", async () => {
+      // First set some values
+      await setStyleAction(manager, {
+        dimension: "hyperboleTendency",
+        value: "0.9",
+        user: "carol",
+      });
+
+      const result = await resetStyleAction(manager, { user: "carol" });
+      expect(isSuccess(result)).toBe(true);
+      if (!isSuccess(result)) return;
+      expect(result.data.profile.hyperboleTendency).toBe(DEFAULT_STYLE_PROFILE.hyperboleTendency);
+      expect(result.data.profile.userOverrides).toEqual([]);
+      expect(result.data.message).toContain("reset");
+    });
+
+    it("resets default user when no user specified", async () => {
+      const result = await resetStyleAction(manager, {});
+      expect(isSuccess(result)).toBe(true);
+      if (!isSuccess(result)) return;
+      expect(result.data.profile.hyperboleTendency).toBe(DEFAULT_STYLE_PROFILE.hyperboleTendency);
     });
   });
 });
