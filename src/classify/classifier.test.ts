@@ -1,38 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   classifyEmotion,
-  buildClassifierPrompt,
   parseClassifierResponse,
   coerceClassificationResult,
 } from "./classifier.js";
 import { DEFAULT_CONFIG } from "../types.js";
 
 describe("classifier", () => {
-  // -----------------------------------------------------------------------
-  // buildClassifierPrompt
-  // -----------------------------------------------------------------------
-
-  describe("buildClassifierPrompt", () => {
-    it("includes the role in the prompt", () => {
-      const prompt = buildClassifierPrompt("Hello world", "user", DEFAULT_CONFIG.emotionLabels);
-      expect(prompt).toContain("user");
-      expect(prompt).toContain("Hello world");
-    });
-
-    it("includes available emotion labels", () => {
-      const labels = ["happy", "sad", "angry"];
-      const prompt = buildClassifierPrompt("test", "assistant", labels);
-      expect(prompt).toContain("happy");
-      expect(prompt).toContain("sad");
-      expect(prompt).toContain("angry");
-    });
-
-    it("asks for JSON output", () => {
-      const prompt = buildClassifierPrompt("test", "user", DEFAULT_CONFIG.emotionLabels);
-      expect(prompt.toLowerCase()).toContain("json");
-    });
-  });
-
   // -----------------------------------------------------------------------
   // parseClassifierResponse
   // -----------------------------------------------------------------------
@@ -114,11 +88,11 @@ describe("classifier", () => {
   });
 
   // -----------------------------------------------------------------------
-  // classifyEmotion -- Anthropic backend (mock)
+  // classifyEmotion -- Anthropic with role: 'agent'
   // -----------------------------------------------------------------------
 
-  describe("classifyEmotion (Anthropic)", () => {
-    it("calls Anthropic Messages API for claude models", async () => {
+  describe("classifyEmotion (role: agent)", () => {
+    it("calls Anthropic and uses agent prompt", async () => {
       const mockResponse = {
         label: "happy",
         intensity: 0.7,
@@ -138,10 +112,10 @@ describe("classifier", () => {
 
       const result = await classifyEmotion(
         "Hello! Great to see you!",
-        "user",
         {
           apiKey: "sk-ant-test",
           model: "claude-sonnet-4-5-20250514",
+          role: "agent",
           emotionLabels: DEFAULT_CONFIG.emotionLabels,
           confidenceMin: 0.35,
           fetchFn: mockFetch,
@@ -157,127 +131,19 @@ describe("classifier", () => {
       expect(callArgs[0]).toBe("https://api.anthropic.com/v1/messages");
       expect(callArgs[1].headers["x-api-key"]).toBe("sk-ant-test");
       expect(callArgs[1].headers["anthropic-version"]).toBe("2023-06-01");
-    });
 
-    it("auto-detects Anthropic from model name containing 'claude'", async () => {
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            content: [
-              { type: "text", text: JSON.stringify({ label: "calm", intensity: 0.3, reason: "test", confidence: 0.8 }) },
-            ],
-          }),
-      });
-
-      await classifyEmotion("test", "user", {
-        apiKey: "sk-ant-test",
-        model: "claude-3-haiku-20240307",
-        emotionLabels: DEFAULT_CONFIG.emotionLabels,
-        confidenceMin: 0.35,
-        fetchFn: mockFetch,
-      });
-
-      const callArgs = mockFetch.mock.calls[0];
-      expect(callArgs[0]).toBe("https://api.anthropic.com/v1/messages");
-    });
-
-    it("returns neutral on Anthropic error", async () => {
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 429,
-        text: () => Promise.resolve("rate limited"),
-      });
-
-      const result = await classifyEmotion("test", "user", {
-        apiKey: "sk-ant-test",
-        model: "claude-sonnet-4-5-20250514",
-        emotionLabels: DEFAULT_CONFIG.emotionLabels,
-        confidenceMin: 0.35,
-        fetchFn: mockFetch,
-      });
-
-      expect(result.label).toBe("neutral");
+      // Verify agent prompt is used
+      const body = JSON.parse(callArgs[1].body);
+      expect(body.messages[0].content).toContain("AI ASSISTANT");
     });
   });
 
   // -----------------------------------------------------------------------
-  // classifyEmotion -- OpenAI backend (mock)
+  // classifyEmotion -- Anthropic with role: 'user'
   // -----------------------------------------------------------------------
 
-  describe("classifyEmotion (OpenAI)", () => {
-    it("calls OpenAI for gpt models", async () => {
-      const mockResponse = {
-        label: "happy",
-        intensity: 0.7,
-        reason: "positive greeting",
-        confidence: 0.9,
-      };
-
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            choices: [
-              { message: { content: JSON.stringify(mockResponse) } },
-            ],
-          }),
-      });
-
-      const result = await classifyEmotion(
-        "Hello! Great to see you!",
-        "user",
-        {
-          apiKey: "sk-test",
-          baseUrl: "https://api.openai.com/v1",
-          model: "gpt-4o-mini",
-          emotionLabels: DEFAULT_CONFIG.emotionLabels,
-          confidenceMin: 0.35,
-          fetchFn: mockFetch,
-        },
-      );
-
-      expect(result.label).toBe("happy");
-      expect(mockFetch).toHaveBeenCalledTimes(1);
-      const callArgs = mockFetch.mock.calls[0];
-      expect(callArgs[0]).toContain("openai.com");
-    });
-
-    it("omits temperature for reasoning models (gpt-5-mini, o1, o3)", async () => {
-      const mockResponse = {
-        label: "curious",
-        intensity: 0.5,
-        reason: "asking questions",
-        confidence: 0.8,
-      };
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            choices: [{ message: { content: JSON.stringify(mockResponse) } }],
-          }),
-      });
-
-      await classifyEmotion("How does this work?", "user", {
-        apiKey: "sk-test",
-        model: "gpt-5-mini",
-        emotionLabels: DEFAULT_CONFIG.emotionLabels,
-        confidenceMin: 0.35,
-        fetchFn: mockFetch,
-      });
-
-      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-      expect(body.model).toBe("gpt-5-mini");
-      expect(body).not.toHaveProperty("temperature");
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // classifyEmotion -- External endpoint
-  // -----------------------------------------------------------------------
-
-  describe("classifyEmotion (endpoint)", () => {
-    it("calls external endpoint when classifierUrl is set", async () => {
+  describe("classifyEmotion (role: user)", () => {
+    it("calls Anthropic and uses user prompt", async () => {
       const mockResponse = {
         label: "frustrated",
         intensity: 0.6,
@@ -287,14 +153,20 @@ describe("classifier", () => {
 
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve(mockResponse),
+        json: () =>
+          Promise.resolve({
+            content: [
+              { type: "text", text: JSON.stringify(mockResponse) },
+            ],
+          }),
       });
 
       const result = await classifyEmotion(
-        "This deployment keeps failing",
-        "user",
+        "This deployment keeps failing!",
         {
-          classifierUrl: "https://classifier.example.com/classify",
+          apiKey: "sk-ant-test",
+          model: "claude-sonnet-4-5-20250514",
+          role: "user",
           emotionLabels: DEFAULT_CONFIG.emotionLabels,
           confidenceMin: 0.35,
           fetchFn: mockFetch,
@@ -302,10 +174,12 @@ describe("classifier", () => {
       );
 
       expect(result.label).toBe("frustrated");
-      expect(mockFetch).toHaveBeenCalledWith(
-        "https://classifier.example.com/classify",
-        expect.objectContaining({ method: "POST" }),
-      );
+      expect(result.intensity).toBe(0.6);
+
+      // Verify user prompt is used
+      const callArgs = mockFetch.mock.calls[0];
+      const body = JSON.parse(callArgs[1].body);
+      expect(body.messages[0].content).toContain("HUMAN USER");
     });
   });
 
@@ -319,10 +193,10 @@ describe("classifier", () => {
 
       const result = await classifyEmotion(
         "test message",
-        "user",
         {
           apiKey: "test-key",
-          model: "gpt-4o-mini",
+          model: "claude-sonnet-4-5-20250514",
+          role: "agent",
           emotionLabels: DEFAULT_CONFIG.emotionLabels,
           confidenceMin: 0.35,
           fetchFn: mockFetch,
@@ -343,10 +217,10 @@ describe("classifier", () => {
 
       const result = await classifyEmotion(
         "test",
-        "user",
         {
           apiKey: "test-key",
           model: "claude-sonnet-4-5-20250514",
+          role: "user",
           emotionLabels: DEFAULT_CONFIG.emotionLabels,
           confidenceMin: 0.35,
           fetchFn: mockFetch,
@@ -356,9 +230,10 @@ describe("classifier", () => {
       expect(result.label).toBe("neutral");
     });
 
-    it("throws when no apiKey and no classifierUrl", async () => {
+    it("throws when no apiKey provided", async () => {
       await expect(
-        classifyEmotion("test", "user", {
+        classifyEmotion("test", {
+          role: "agent",
           emotionLabels: DEFAULT_CONFIG.emotionLabels,
           confidenceMin: 0.35,
         }),
