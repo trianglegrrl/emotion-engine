@@ -9,7 +9,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue.svg)](https://www.typescriptlang.org/)
 [![npm](https://img.shields.io/npm/v/openfeelz.svg)](https://www.npmjs.com/package/openfeelz)
 
-An [OpenClaw](https://openclaw.com) plugin that gives AI agents a multidimensional emotional model with personality-influenced decay, rumination, and multi-agent awareness.
+A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin that gives AI agents a multidimensional emotional model with personality-influenced decay, rumination, style profiling, and multi-agent awareness.
 
 Most agents vibes-check each message independently and forget everything between turns. OpenFeelz gives them emotional short-term memory -- the agent knows you've been frustrated for the last three messages, and it carries that context forward. It's not sentience, it's just better interaction design. (But it's pretty cool.)
 
@@ -18,91 +18,139 @@ Most agents vibes-check each message independently and forget everything between
 - **PAD Dimensional Model** -- Pleasure, Arousal, Dominance + Connection, Curiosity, Energy, Trust
 - **Ekman Basic Emotions** -- Happiness, Sadness, Anger, Fear, Disgust, Surprise
 - **OCEAN Personality** -- Big Five traits influence baselines, decay rates, and response intensity
-- **Exponential Decay** -- Emotions fade toward personality-influenced baselines over time
+- **Exponential Decay** -- Emotions fade toward personality-influenced baselines over time, with `slow`, `fast`, and `turn`-based presets
 - **Rumination Engine** -- Intense emotions continue to influence state across interactions
-- **Goal-Aware Modulation** -- Personality-inferred goals amplify relevant emotions
+- **User Style Profiling** -- Learns your communication style (hyperbole, profanity, expressiveness, sarcasm) and calibrates classification accordingly
+- **Token Usage Tracking** -- Tracks classification costs so you always know what the emotional model is spending
 - **Multi-Agent Awareness** -- Agents see other agents' emotional states in the system prompt
-- **Custom Taxonomy** -- Define your own emotion labels with dimension mappings
-- **LLM Classification** -- Automatically classify user/agent emotions via OpenAI-compatible models
-- **Web Dashboard** -- Glassmorphism UI at `/emotion-dashboard`
-- **MCP Server** -- Expose emotional state to Cursor, Claude Desktop, etc.
-- **CLI Tools** -- `openclaw emotion status`, `reset`, `personality`, `history`, `decay` (preset or per-dimension), **`wizard`** (interactive configuration)
+- **MCP Server** -- Expose emotional state to Cursor, Claude Desktop, and other MCP-compatible clients
+- **Slash Commands** -- `/openfeelz status`, `personality`, `reset`, `history`, `decay`, `wizard`, `dashboard`, `config`, `style`
+- **Web Dashboard** -- Glassmorphism UI for real-time emotional state visualization
 
 ## Installation
 
-OpenClaw resolves plugin names from the npm registry, so you can install by package name (no URL or path needed):
+From the Claude Code plugin marketplace:
 
-```bash
-openclaw plugins install openfeelz
-openclaw plugins enable openfeelz
+```
+/plugin marketplace add trianglegrrl/openfeelz
+/plugin install openfeelz
 ```
 
-Restart the gateway after installing. To pin a version: `openclaw plugins install openfeelz@1.1.0`. To install from a local clone (e.g. for development), run `npm run build` in the repo first, then `openclaw plugins install /path/to/openfeelz`.
+Claude Code will prompt you for configuration options during install (decay preset, agent emotions toggle). You can change these later with `/openfeelz config`.
 
-When using **reasoning models** (e.g. gpt-5-mini, o1, o3), the classifier omits custom temperature so the API accepts the request. Optional classification logging can be enabled via config (see `docs/OPENFEELZ-FIX-COMPLETE.md`).
+For local development, clone the repo, run `npm run build`, then launch Claude Code with the `--plugin-dir` flag pointing to your checkout:
+
+```bash
+claude --plugin-dir /path/to/openfeelz
+```
+
+**No API key needed.** Classification runs via `claude -p` (the Claude CLI's prompt mode), which uses your existing Claude Code authentication. No separate Anthropic API key, no OpenAI key, no environment variables to configure.
 
 ## How It Works
 
-Every agent turn, OpenFeelz hooks into the lifecycle:
+Every turn, OpenFeelz hooks into the Claude Code lifecycle:
 
 ```
 User sends a message
-        |
-        v
-  [before_agent_start hook]
-        |
-        v
-  1. Load emotion state from disk
-  2. Apply exponential decay based on elapsed time
+    |
+    v
+  [UserPromptSubmit hook]
+    |
+    v
+  1. Load emotional state from disk
+  2. Apply exponential decay (time-based or turn-based)
   3. Advance any active rumination entries
-  4. Format state into an <emotion_state> XML block
-  5. Return as "prependContext" to OpenClaw
-        |
-        v
-  Agent sees emotional context in its system prompt
-        |
-        v
+  4. If sync classification is on: classify user emotion (with style profile)
+  5. Inject <openfeelz> context via additionalContext
+    |
+    v
+  Agent sees emotional context
+    |
+    v
   [Agent responds]
-        |
-        v
-  [agent_end hook]
-        |
-        v
-  1. Classify emotions in user + agent messages via LLM
-  2. Map to dimensional changes
-  3. Start rumination if intensity exceeds threshold
-  4. Save updated state to disk
+    |
+    v
+  [Stop hook (async)]
+    |
+    v
+  1. Classify agent + user emotions via claude -p
+  2. Map to dimensional changes, start rumination if intense
+  3. If profiling interval reached: update user style profile
+  4. Save state to disk
 ```
 
 ### What the Agent Sees
 
-The plugin prepends an `<emotion_state>` block to the system prompt:
+The plugin injects an `<openfeelz>` block into the agent's context with clearly separated sections:
 
 ```xml
-<emotion_state>
-  <dimensions>
-    pleasure: lowered (-0.12), arousal: elevated (0.18), curiosity: elevated (0.72)
-  </dimensions>
-  <user>
-    2026-02-06 09:15: Felt strongly frustrated because deployment keeps failing.
-    2026-02-06 08:40: Felt moderately anxious because tight deadline approaching.
-    Trend (last 24h): mostly frustrated.
-  </user>
-  <agent>
-    2026-02-06 09:10: Felt moderately focused because working through error logs.
-  </agent>
-  <others>
-    research-agent — 2026-02-06 08:00: Felt mildly curious because investigating new library.
-  </others>
-</emotion_state>
+The following is your emotional context from OpenFeelz. <agent_emotional_state>
+is YOUR state. <user_emotional_state> is the HUMAN's state. Do not confuse them.
+
+<openfeelz>
+  <!-- YOUR (the AI agent's) emotional state. This is YOUR internal state, not the user's. -->
+  <agent_emotional_state>
+    <personality>
+      openness: 0.70, conscientiousness: 0.60, extraversion: 0.50,
+      agreeableness: 0.80, neuroticism: 0.30
+    </personality>
+    <dimensions>
+      pleasure: lowered (-0.12, baseline: 0.08)
+      arousal: elevated (0.18, baseline: 0.00)
+      curiosity: elevated (0.72, baseline: 0.60)
+    </dimensions>
+    <basic_emotions>
+      happiness: 0.12
+      surprise: 0.08
+    </basic_emotions>
+    <your_recent_emotions>
+      2026-04-07 09:10: Felt moderately focused because working through error logs.
+    </your_recent_emotions>
+  </agent_emotional_state>
+
+  <!-- The HUMAN USER's emotional state (classified from their messages). This is NOT your emotion. -->
+  <user_emotional_state>
+    <recent_emotions>
+      2026-04-07 09:15: Felt strongly frustrated because deployment keeps failing.
+      2026-04-07 08:40: Felt moderately anxious because tight deadline approaching.
+    </recent_emotions>
+    <trend>mostly frustrated (last 24h)</trend>
+  </user_emotional_state>
+</openfeelz>
 ```
 
-- **`<dimensions>`** -- PAD dimensions that deviate >0.15 from personality baseline
-- **`<user>`** -- Last 3 classified user emotions with timestamps, intensity, and triggers (optional; set `includeUserEmotions: true` to include; default off due to classification quality)
-- **`<agent>`** -- Last 2 agent emotions (continuity across turns)
-- **`<others>`** -- Other agents' recent emotional states (up to `maxOtherAgents`)
+- **`<agent_emotional_state>`** -- The agent's own OCEAN personality, dimensional deviations, basic emotions, and recent emotion history. Always present when `agentEmotions` is enabled.
+- **`<user_emotional_state>`** -- The human's classified emotions with timestamps, intensity, triggers, and trend. Only present when `userEmotions` is enabled and there's data to show.
 
-The block only appears when there's something to show. Set `contextEnabled: false` to disable injection while keeping classification, decay, and the dashboard active.
+The block only appears when there's something to show. Both sections are explicitly labeled with XML comments so the agent never confuses its own emotions with the user's.
+
+## Style Profiling
+
+OpenFeelz learns how you communicate so it can tell the difference between "this user is genuinely furious" and "this user just talks like that."
+
+### The Four Dimensions
+
+| Dimension | What It Measures | 0.0 | 1.0 |
+|-----------|-----------------|-----|-----|
+| **hyperboleTendency** | Exaggeration in language | Understated, literal | Hyperbolic, dramatic |
+| **casualProfanity** | Use of casual swearing | None | Frequent |
+| **emotionalExpressiveness** | How much emotion shows in text | Flat, terse | Very expressive |
+| **sarcasmFrequency** | Frequency of sarcasm/irony | Straightforward | Frequently sarcastic |
+
+### How It Works
+
+1. **Batch profiling**: Every 10 messages (configurable), OpenFeelz sends recent message excerpts to `claude -p` and asks it to score the four dimensions.
+2. **EMA blending**: New observations are blended into the existing profile using an exponential moving average. Early samples carry more weight; the profile stabilizes as sample size grows.
+3. **Maturity threshold**: The style profile only influences classification after 10+ samples, so the system doesn't jump to conclusions from a single message.
+4. **Staleness**: If 30+ days pass with no new messages, the sample size is reduced so fresh observations carry more weight again. Your profile re-adapts naturally.
+
+### Viewing and Adjusting
+
+```
+/openfeelz style
+```
+
+Shows your current style profile with all four dimension scores, sample size, and last update time. You can manually override any dimension -- for example, if the system thinks you're more sarcastic than you are. User overrides are protected: the auto-profiler will never change a dimension you've manually set.
 
 ## Decay Model
 
@@ -113,7 +161,15 @@ newValue = baseline + (currentValue - baseline) * e^(-rate * elapsedHours)
 halfLife = ln(2) / rate
 ```
 
-### Default Rates
+### Presets
+
+| Preset | Mode | Half-Life | Best For |
+|--------|------|-----------|----------|
+| `slow` | Time-based | ~12h (varies by dimension) | Human-like emotional cadence (default) |
+| `fast` | Time-based | ~1h (all dimensions) | AI-style, rapid emotional cycling |
+| `turn` | Turn-based | ~5 turns | Per-conversation, wall-clock independent |
+
+### Default Rates (slow preset)
 
 | Dimension / Emotion | Rate (per hour) | Half-Life | Notes |
 |---------------------|-----------------|-----------|-------|
@@ -144,159 +200,84 @@ OCEAN traits adjust decay rates:
 
 Decay is computed on-demand, not on a timer:
 
-1. **`before_agent_start`** -- Primary mechanism. Applied based on elapsed time since last update.
-2. **Tool `query` action** -- Decay applied before reading, so values are accurate.
-3. **Optional background service** -- Set `decayServiceEnabled: true` for dashboard accuracy between interactions.
-
-### Configuring Decay
-
-Four levels of control:
-
-- **Decay preset** -- `decayPreset: "fast"` (~1h half-life, AI-style) or `"slow"` (human-like, default). Set via config or CLI: `openclaw emotion decay fast` / `openclaw emotion decay slow`.
-- **Global half-life** -- `halfLifeHours: 6` (used for context trend window; preset controls actual decay rates).
-- **Per-dimension overrides** -- `"decayRates": { "pleasure": 0.1, "trust": 0.02 }` when using `decayPreset: "slow"` or `"custom"`.
-- **Personality-driven** -- With `slow`/`custom`, OCEAN traits influence baselines and rates; change traits and rates recalculate automatically.
+1. **`UserPromptSubmit` hook** -- Primary mechanism. Applied based on elapsed time (or turn count) since last update.
+2. **MCP tool `query` action** -- Decay applied before reading, so values are always current.
 
 ## Configuration
 
-In `~/.openclaw/openclaw.json` under `plugins.entries.openfeelz.config`:
+OpenFeelz is configured through the Claude Code plugin system. During installation, you'll be prompted for the key settings:
 
-```json
-{
-  "plugins": {
-    "entries": {
-      "openfeelz": {
-        "config": {
-          "apiKey": "${OPENAI_API_KEY}",
-          "model": "gpt-5-mini",
-          "halfLifeHours": 12,
-          "ruminationEnabled": true,
-          "personality": {
-            "openness": 0.7,
-            "conscientiousness": 0.6,
-            "extraversion": 0.5,
-            "agreeableness": 0.8,
-            "neuroticism": 0.3
-          }
-        }
-      }
-    }
-  }
-}
-```
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `decayPreset` | `"slow"` \| `"fast"` \| `"turn"` | `"slow"` | Decay speed: slow (~12h), fast (~1h), or turn-based (~5 turns) |
+| `agentEmotions` | boolean | `true` | Enable the agent's own emotional state |
+| `userEmotions` | boolean | `false` | Classify emotions from user messages |
+| `syncUserClassification` | boolean | `false` | Classify user emotions synchronously (current-turn, ~1s latency) vs async (one turn behind) |
+| `model` | string | `claude-haiku-4-5-20251001` | Anthropic model for emotion classification |
 
-Also configurable via the OpenClaw web UI.
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OPENAI_API_KEY` | _(required)_ | API key for LLM emotion classification |
-| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Custom API base URL |
-| `EMOTION_MODEL` | `gpt-5-mini` | Classification model (when OpenAI key present) |
-| `EMOTION_CLASSIFIER_URL` | _(none)_ | External HTTP classifier (bypasses LLM) |
-| `EMOTION_HALF_LIFE_HOURS` | `12` | Global decay half-life |
-| `EMOTION_CONFIDENCE_MIN` | `0.35` | Min confidence threshold |
-| `EMOTION_HISTORY_SIZE` | `100` | Max stored stimuli per agent |
-| `EMOTION_TIMEZONE` | _(system)_ | IANA timezone for display |
+Additional configuration is available via `/openfeelz config`, which lets you view and modify all settings including rumination, context injection, personality traits, and per-dimension decay rate overrides.
 
 ### Full Options Reference
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `apiKey` | string | `$OPENAI_API_KEY` | API key for LLM classification |
-| `baseUrl` | string | OpenAI default | API base URL |
-| `model` | string | `claude-sonnet-4-5` / `gpt-5-mini` | Classification model (auto-selected by available API key) |
-| `classifierUrl` | string | _(none)_ | External classifier URL |
+| `model` | string | `claude-haiku-4-5-20251001` | Classification model (via `claude -p`) |
 | `confidenceMin` | number | `0.35` | Min confidence threshold |
-| `halfLifeHours` | number | `12` | Global decay half-life |
+| `halfLifeHours` | number | `12` | Global decay half-life (trend window) |
 | `trendWindowHours` | number | `24` | Trend computation window |
-| `maxHistory` | number | `100` | Max stored stimuli |
+| `maxHistory` | number | `100` | Max stored stimuli per agent/user |
 | `ruminationEnabled` | boolean | `true` | Enable rumination engine |
 | `ruminationThreshold` | number | `0.7` | Intensity threshold for rumination |
 | `ruminationMaxStages` | number | `4` | Max rumination stages |
-| `realtimeClassification` | boolean | `false` | Classify on every message |
-| `contextEnabled` | boolean | `true` | Prepend emotion context to prompt |
-| `includeUserEmotions` | boolean | `false` | Include user/partner emotions in context block (default off due to classification quality) |
-| `decayPreset` | `"fast"` \| `"slow"` \| `"custom"` | `"slow"` | Decay speed: fast (~1h half-life) or slow (human-like); custom uses `decayRates` overrides |
-| `decayServiceEnabled` | boolean | `false` | Background decay service |
-| `decayServiceIntervalMinutes` | number | `30` | Decay service interval |
-| `dashboardEnabled` | boolean | `true` | Serve web dashboard |
-| `timezone` | string | _(system)_ | IANA timezone |
-| `maxOtherAgents` | number | `3` | Max other agents in prompt |
-| `emotionLabels` | string[] | _(21 built-in)_ | Custom label taxonomy |
+| `contextEnabled` | boolean | `true` | Inject emotion context into agent prompt |
+| `agentEmotions` | boolean | `true` | Enable agent emotional model |
+| `userEmotions` | boolean | `false` | Classify user emotions |
+| `syncUserClassification` | boolean | `false` | Sync vs async user classification |
+| `decayPreset` | `"fast"` \| `"slow"` \| `"turn"` | `"slow"` | Decay speed preset |
+| `maxOtherAgents` | number | `3` | Max other agents shown in context |
+| `emotionLabels` | string[] | *(21 built-in)* | Custom label taxonomy |
 | `personality` | object | all `0.5` | OCEAN trait values |
-| `decayRates` | object | _(see table)_ | Per-dimension rate overrides |
-| `dimensionBaselines` | object | _(computed)_ | Per-dimension baseline overrides |
+| `decayRates` | object | *(see table)* | Per-dimension rate overrides |
+| `dimensionBaselines` | object | *(computed)* | Per-dimension baseline overrides |
 
-## Agent Tool: `emotion_state`
+## Commands
 
-The agent can inspect and modify its own emotional state:
+All commands are available as `/openfeelz <command>` in Claude Code:
 
-| Action | Description | Parameters |
-|--------|-------------|------------|
-| `query` | Get current emotional state | `format?: "full" / "summary" / "dimensions" / "emotions"` |
-| `modify` | Apply an emotional stimulus | `emotion, intensity?, trigger?` |
-| `set_dimension` | Set or adjust a dimension | `dimension, value?` or `dimension, delta?` |
-| `reset` | Reset to personality baseline | `dimensions?` (comma-separated, or all) |
-| `set_personality` | Set an OCEAN trait | `trait, value` |
-| `get_personality` | Get current OCEAN profile | _(none)_ |
+| Command | Description |
+|---------|-------------|
+| `/openfeelz status` | Formatted emotional state with bars, dimensions, and token usage |
+| `/openfeelz personality` | View or set OCEAN personality traits |
+| `/openfeelz reset` | Reset emotional state to personality baseline |
+| `/openfeelz history` | Show recent emotional stimuli |
+| `/openfeelz decay` | Show or change decay preset (slow/fast/turn) |
+| `/openfeelz wizard` | Interactive personality preset picker with 10 famous-personality profiles |
+| `/openfeelz dashboard` | Launch the web dashboard |
+| `/openfeelz config` | View or change plugin configuration |
+| `/openfeelz style` | View or adjust your communication style profile |
 
-## CLI
+### Personality Wizard
 
-```bash
-openclaw emotion status              # Formatted state with bars
-openclaw emotion status --json       # Raw JSON
-openclaw emotion personality         # OCEAN profile
-openclaw emotion personality set --trait openness --value 0.8
-openclaw emotion reset               # Reset all to baseline
-openclaw emotion reset --dimensions pleasure,arousal
-openclaw emotion history --limit 20  # Recent stimuli
-openclaw emotion decay fast         # Set decay preset to fast (~1h half-life)
-openclaw emotion decay slow         # Set decay preset to slow (human-like, default)
-openclaw emotion decay --dimension pleasure --rate 0.05   # Per-dimension override (when not using preset)
-openclaw emotion wizard             # Interactive configuration wizard (see below)
-```
-
-### Configuration wizard: `openclaw emotion wizard`
-
-The **configuration wizard** is the CLI option for guided setup. Run **`openclaw emotion wizard`**. It runs an interactive (TUI-style) flow where you can:
-
-- **a) Choose a personality preset** — Pick one of 10 famous-personality presets (OCEAN profiles based on biographical research). Each option is listed with a short explanation. The wizard applies that preset’s personality to your agent’s state.
-- **b) Customize** — Skip presets and go straight to custom settings, or after picking a preset you can optionally configure:
-  - **Decay speed** — Fast (AI-style, emotions fade in ~1 hour) or Slow (human-like, ~12h half-life).
-  - **Model**, decay half-life (trend window), rumination, context injection, and dashboard.
-
-So: run **`openclaw emotion wizard`** to open the wizard; it will ask whether you want a **preset** (with explanations) or **custom**, then optionally walk through key config fields including decay speed, with validation and help text.
-
-#### Default personalities in the picker
-
-The preset picker offers these 10 options (diverse across time, region, and domain; OCEAN values from biographical/psychological literature, see `docs/personality-presets-research.md`):
+`/openfeelz wizard` runs an interactive flow where you pick from 10 personality presets (OCEAN profiles based on biographical research) or go fully custom:
 
 | Preset | Description |
 |--------|-------------|
-| **Albert Einstein** | Theoretical physicist (Germany/US, 20th c.) — high openness & conscientiousness, introspective. |
-| **Marie Curie** | Physicist and chemist (Poland/France, 19th–20th c.) — perseverance, solitary focus. |
-| **Nelson Mandela** | Anti-apartheid leader, President of South Africa (20th c.) — high agreeableness & extraversion, emotional stability. |
-| **Wangari Maathai** | Environmentalist and Nobel Peace laureate (Kenya, 20th c.) — Green Belt Movement; visionary, resilient. |
-| **Frida Kahlo** | Painter (Mexico, 20th c.) — high openness and emotional intensity. |
-| **Confucius** | Philosopher and teacher (Ancient China) — high conscientiousness & agreeableness, emphasis on li and ren. |
-| **Simón Bolívar** | Liberator and revolutionary (South America, 19th c.) — visionary, charismatic; driven, mood swings. |
-| **Sitting Bull** | Lakota leader and resistance figure (Indigenous Americas, 19th c.) — steadfast, defiant sovereignty, calm under pressure. |
-| **Sejong the Great** | King and scholar, creator of Hangul (Korea, 15th c.) — scholarly, benevolent, humble. |
-| **Rabindranath Tagore** | Poet and philosopher, Nobel laureate (India, 20th c.) — very high openness and agreeableness. |
+| **Albert Einstein** | Theoretical physicist -- high openness & conscientiousness, introspective |
+| **Marie Curie** | Physicist and chemist -- perseverance, solitary focus |
+| **Nelson Mandela** | Anti-apartheid leader -- high agreeableness & extraversion, emotional stability |
+| **Wangari Maathai** | Environmentalist, Nobel Peace laureate -- visionary, resilient |
+| **Frida Kahlo** | Painter -- high openness and emotional intensity |
+| **Confucius** | Philosopher and teacher -- high conscientiousness & agreeableness |
+| **Simon Bolivar** | Liberator and revolutionary -- visionary, charismatic, driven |
+| **Sitting Bull** | Lakota leader -- steadfast, defiant sovereignty, calm under pressure |
+| **Sejong the Great** | King and scholar, creator of Hangul -- scholarly, benevolent, humble |
+| **Rabindranath Tagore** | Poet and philosopher, Nobel laureate -- very high openness and agreeableness |
 
-Choosing a preset updates the agent’s OCEAN personality (and thus baselines and decay rates). You can still edit config manually or via the OpenClaw web UI.
-
-## Dashboard
-
-`http://localhost:<gateway-port>/emotion-dashboard`
-
-Real-time visualization of PAD dimensions, basic emotions, OCEAN profile, recent stimuli, and active rumination. Append `?format=json` for the raw API.
+After picking a preset (or skipping to custom), you can optionally configure decay speed, rumination, and other settings.
 
 ## MCP Server
 
-Works with any MCP-compatible client (Cursor, Claude Desktop, etc.):
+Works with any MCP-compatible client (Cursor, Claude Desktop, etc.). The plugin registers the MCP server automatically when installed. For standalone use:
 
 ```json
 {
@@ -313,56 +294,76 @@ Works with any MCP-compatible client (Cursor, Claude Desktop, etc.):
 
 **Tools:** `query_emotion`, `modify_emotion`, `set_personality`
 
-## Migration from v1
+## Token Usage
 
-```bash
-openclaw hooks disable emotion-state
-openclaw emotion migrate
-```
+Every emotion classification call uses tokens. OpenFeelz tracks cumulative usage -- input tokens, output tokens, estimated cost, and total classification count. Run `/openfeelz status` to see your running totals. Classification uses `claude-haiku-4-5` by default, which keeps costs minimal (fractions of a cent per classification).
 
-Converts v1 state files (flat labels + string intensities) to v2 format (dimensional model + numeric intensities). Uses a separate state file (`openfeelz.json`), so no risk of data loss.
+## Dashboard
+
+`/openfeelz dashboard` launches a glassmorphism-styled web UI for real-time visualization of PAD dimensions, basic emotions, OCEAN profile, recent stimuli, and active rumination.
 
 ## Architecture
 
 ```
-index.ts                 Plugin entry: registers tool, hooks, service, CLI, dashboard
+.claude-plugin/
+  plugin.json          Plugin manifest: hooks, MCP, commands, userConfig
+hooks/
+  hooks.json           Hook event registration (SessionStart, UserPromptSubmit, Stop)
+  on-session-start.js  SessionStart entry point
+  on-user-prompt.js    UserPromptSubmit entry point
+  on-stop.js           Stop entry point (async)
+commands/
+  status.md            /openfeelz status
+  personality.md       /openfeelz personality
+  reset.md             /openfeelz reset
+  history.md           /openfeelz history
+  decay.md             /openfeelz decay
+  wizard.md            /openfeelz wizard
+  dashboard.md         /openfeelz dashboard
+  config.md            /openfeelz config
+  style.md             /openfeelz style
 src/
-  types.ts               All interfaces (DimensionalState, BasicEmotions, OCEANProfile, etc.)
+  types.ts             All interfaces (DimensionalState, BasicEmotions, OCEANProfile, etc.)
   model/
-    emotion-model.ts     Core model: clamping, primary detection, intensity, deltas
-    personality.ts       OCEAN: baselines, decay rates, rumination probability
-    decay.ts             Exponential decay toward personality-influenced baselines
-    mapping.ts           Emotion label -> dimension/emotion delta mapping (60+ labels)
-    rumination.ts        Multi-stage internal processing for intense emotions
-    goal-modulation.ts   Personality-inferred goals amplify relevant emotions
-    custom-taxonomy.ts   User-defined emotion labels with custom mappings
+    emotion-model.ts   Core model: clamping, primary detection, intensity, deltas
+    personality.ts     OCEAN: baselines, decay rates, rumination probability
+    decay.ts           Exponential decay toward personality-influenced baselines
+    mapping.ts         Emotion label -> dimension/emotion delta mapping (60+ labels)
+    rumination.ts      Multi-stage internal processing for intense emotions
   state/
-    state-manager.ts     Orchestrator: classify + map + decay + ruminate + persist
-    state-file.ts        Atomic JSON I/O with file locking
-    multi-agent.ts       Scan sibling agent states for awareness
+    state-manager.ts   Orchestrator: classify + map + decay + ruminate + persist
+    state-file.ts      Atomic JSON I/O with file locking
+    multi-agent.ts     Scan sibling agent states for awareness
   classify/
-    classifier.ts        Unified LLM + HTTP classifier with fallback
-  tool/
-    emotion-tool.ts      OpenClaw tool: query/modify/reset/personality
-  hook/
-    hooks.ts             before_agent_start + agent_end hooks
-  cli/
-    cli.ts               Commander.js CLI commands
-  http/
-    dashboard.ts         Glassmorphism HTML dashboard
-  mcp/
-    mcp-server.ts        MCP server resources + tools
+    claude-classify.ts Emotion classification via claude -p
+    prompts.ts         Classification prompt templates
+    style-profiler.ts  EMA-based user style profiling
+    style-profiler-prompt.ts  Profiling prompt builder
+  config/
+    resolve-config.ts  Merge env vars + plugin userConfig into resolved config
+    decay-presets.ts   Fast/slow/turn decay rate tables
+    personality-presets.ts  10 famous-personality OCEAN profiles
+    style-config.ts    Style profiling configuration defaults
+  hooks/
+    runner.ts          HookRunner: SessionStart, UserPromptSubmit, Stop handlers
   format/
-    prompt-formatter.ts  System prompt <emotion_state> block builder
-  migration/
-    migrate-v1.ts        v1 -> v2 converter
+    prompt-formatter.ts  <openfeelz> block builder with agent/user sections
+    status-markdown.ts   Formatted status output for /openfeelz status
+  helpers/
+    state-helper.ts    Shared state loading utilities
+  utils/
+    claude-cli.ts      claude -p wrapper for classification calls
+    excerpt.ts         Token-limited excerpt extraction
+    message-content.ts Message content parsing
+  mcp/
+    mcp-server.ts      MCP server: resources + tools
 ```
 
 ## Development
 
 ```bash
 npm install
-npm test              # Run all tests
+npm test              # Run all tests (vitest)
 npm run test:watch    # Watch mode
 npm run test:coverage # Coverage report
 npm run typecheck     # TypeScript strict mode
@@ -380,4 +381,4 @@ Issues, PRs, and questions are all welcome. If you want to poke around the model
 
 ---
 
-Made with ❤️ by [@trianglegrrl](https://github.com/trianglegrrl) for the OpenClaw community 🦞
+Made with love by [@trianglegrrl](https://github.com/trianglegrrl)
