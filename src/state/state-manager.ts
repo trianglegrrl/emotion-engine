@@ -81,11 +81,54 @@ export class StateManager {
   // -----------------------------------------------------------------------
 
   /**
-   * Apply time-based decay to all dimensions and basic emotions.
-   * Computes elapsed time since lastUpdated.
+   * Apply decay to all dimensions and basic emotions.
+   * When config.decayPreset is "turn", decay is based on conversation turns.
+   * Otherwise, decay is time-based (elapsed hours since lastUpdated).
    * Returns a new state; does not mutate input.
    */
   applyDecay(state: EmotionEngineState): EmotionEngineState {
+    const preset = this.config.decayPreset ?? "slow";
+
+    if (preset === "turn") {
+      return this.applyTurnDecay(state);
+    }
+
+    return this.applyTimeDecay(state);
+  }
+
+  /** Turn-based decay: uses turnCount - lastDecayTurn as the elapsed unit. */
+  private applyTurnDecay(state: EmotionEngineState): EmotionEngineState {
+    const turnsSince = state.turnCount - (state.lastDecayTurn ?? 0);
+    if (turnsSince <= 0) return { ...state };
+
+    const { dimensionRates, emotionDecayRates } = getEffectiveDecayRates(
+      state,
+      this.config,
+    );
+
+    const dimensions = decayDimensions(
+      state.dimensions,
+      state.baseline,
+      dimensionRates,
+      turnsSince,
+    );
+    const basicEmotions = decayBasicEmotions(
+      state.basicEmotions,
+      emotionDecayRates,
+      turnsSince,
+    );
+
+    return {
+      ...state,
+      dimensions,
+      basicEmotions,
+      lastDecayTurn: state.turnCount,
+      lastUpdated: new Date().toISOString(),
+    };
+  }
+
+  /** Time-based decay: uses elapsed hours since lastUpdated. */
+  private applyTimeDecay(state: EmotionEngineState): EmotionEngineState {
     const now = Date.now();
     const lastUpdated = new Date(state.lastUpdated).getTime();
     const elapsedHours = Math.max(0, (now - lastUpdated) / 3_600_000);
