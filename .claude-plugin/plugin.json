@@ -6,7 +6,6 @@
   "license": "MIT",
   "repository": "https://github.com/trianglegrrl/openfeelz",
   "keywords": ["emotion", "personality", "ocean", "pad", "affective-computing"],
-  "hooks": "./hooks/hooks.json",
   "mcpServers": {
     "openfeelz": {
       "command": "node",

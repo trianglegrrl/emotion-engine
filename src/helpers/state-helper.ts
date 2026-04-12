@@ -203,6 +203,81 @@ export async function resetState(
   });
 }
 
+/** Set a single dimension to an absolute value. */
+export async function setDimensionAction(
+  manager: StateManager,
+  flags: Readonly<Record<string, string | undefined>>,
+): Promise<ActionResult<{ dimension: DimensionName; value: number; dimensions: DimensionalState }>> {
+  const dimension = flags.dimension;
+  const valueStr = flags.value;
+
+  if (!dimension) {
+    return error("Missing --dimension flag", "MISSING_PARAM");
+  }
+  if (!valueStr) {
+    return error("Missing --value flag", "MISSING_PARAM");
+  }
+  if (!DIMENSION_NAMES.includes(dimension as DimensionName)) {
+    return error(
+      `Invalid dimension "${dimension}". Valid: ${DIMENSION_NAMES.join(", ")}`,
+      "INVALID_DIMENSION",
+    );
+  }
+
+  const value = Number(valueStr);
+  if (Number.isNaN(value)) {
+    return error(`Invalid value "${valueStr}": must be a number`, "INVALID_VALUE");
+  }
+
+  const state = await loadDecayedState(manager);
+  const updated = manager.setDimension(state, dimension as DimensionName, value);
+  await manager.saveState(updated);
+
+  return success({
+    dimension: dimension as DimensionName,
+    value: updated.dimensions[dimension as DimensionName],
+    dimensions: updated.dimensions,
+  });
+}
+
+/** Apply a delta to a single dimension. */
+export async function applyDimensionDeltaAction(
+  manager: StateManager,
+  flags: Readonly<Record<string, string | undefined>>,
+): Promise<ActionResult<{ dimension: DimensionName; delta: number; value: number; dimensions: DimensionalState }>> {
+  const dimension = flags.dimension;
+  const deltaStr = flags.delta;
+
+  if (!dimension) {
+    return error("Missing --dimension flag", "MISSING_PARAM");
+  }
+  if (!deltaStr) {
+    return error("Missing --delta flag", "MISSING_PARAM");
+  }
+  if (!DIMENSION_NAMES.includes(dimension as DimensionName)) {
+    return error(
+      `Invalid dimension "${dimension}". Valid: ${DIMENSION_NAMES.join(", ")}`,
+      "INVALID_DIMENSION",
+    );
+  }
+
+  const delta = Number(deltaStr);
+  if (Number.isNaN(delta)) {
+    return error(`Invalid delta "${deltaStr}": must be a number`, "INVALID_VALUE");
+  }
+
+  const state = await loadDecayedState(manager);
+  const updated = manager.applyDimensionDeltaMethod(state, dimension as DimensionName, delta);
+  await manager.saveState(updated);
+
+  return success({
+    dimension: dimension as DimensionName,
+    delta,
+    value: updated.dimensions[dimension as DimensionName],
+    dimensions: updated.dimensions,
+  });
+}
+
 /** Set a single personality trait. */
 export async function setPersonalityTrait(
   manager: StateManager,
@@ -451,6 +526,8 @@ type ActionHandler = (
 const ACTION_MAP: Readonly<Record<string, ActionHandler>> = {
   query: queryState,
   reset: resetState,
+  "set-dimension": setDimensionAction,
+  "apply-dimension-delta": applyDimensionDeltaAction,
   "set-personality": setPersonalityTrait,
   "get-personality": (mgr) => getPersonality(mgr),
   "set-decay": (_mgr, flags) => setDecayPreset(flags),

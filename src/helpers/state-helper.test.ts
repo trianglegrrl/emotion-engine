@@ -16,6 +16,8 @@ import { buildEmptyState, writeStateFile } from "../state/state-file.js";
 import {
   queryState,
   resetState,
+  setDimensionAction,
+  applyDimensionDeltaAction,
   setPersonalityTrait,
   getPersonality,
   setDecayPreset,
@@ -174,6 +176,62 @@ describe("state-helper", () => {
       expect(isError(result)).toBe(true);
       if (!isError(result)) return;
       expect(result.code).toBe("INVALID_DIMENSION");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // set-dimension / apply-dimension-delta
+  // -------------------------------------------------------------------------
+
+  describe("setDimensionAction", () => {
+    it("sets a valid dimension", async () => {
+      const result = await setDimensionAction(manager, {
+        dimension: "pleasure",
+        value: "0.6",
+      });
+      expect(isSuccess(result)).toBe(true);
+      if (!isSuccess(result)) return;
+      expect(result.data.dimension).toBe("pleasure");
+      expect(result.data.value).toBe(0.6);
+    });
+
+    it("clamps dimension into bounds", async () => {
+      const result = await setDimensionAction(manager, {
+        dimension: "pleasure",
+        value: "2.0",
+      });
+      expect(isSuccess(result)).toBe(true);
+      if (!isSuccess(result)) return;
+      expect(result.data.value).toBeLessThanOrEqual(1);
+    });
+
+    it("rejects invalid dimension", async () => {
+      const result = await setDimensionAction(manager, {
+        // @ts-expect-error test invalid
+        dimension: "nope",
+        value: "0.2",
+      });
+      expect(isError(result)).toBe(true);
+      if (!isError(result)) return;
+      expect(result.code).toBe("INVALID_DIMENSION");
+    });
+  });
+
+  describe("applyDimensionDeltaAction", () => {
+    it("applies a delta", async () => {
+      // seed a known state
+      const state = await manager.getState();
+      await manager.saveState(manager.setDimension(state, "pleasure", 0.5));
+
+      const result = await applyDimensionDeltaAction(manager, {
+        dimension: "pleasure",
+        delta: "0.1",
+      });
+      expect(isSuccess(result)).toBe(true);
+      if (!isSuccess(result)) return;
+      expect(result.data.dimension).toBe("pleasure");
+      expect(result.data.delta).toBe(0.1);
+      expect(result.data.value).toBeCloseTo(0.6, 5);
     });
   });
 
