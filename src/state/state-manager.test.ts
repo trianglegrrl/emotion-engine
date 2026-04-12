@@ -232,6 +232,45 @@ describe("StateManager", () => {
   });
 
   // -----------------------------------------------------------------------
+  // applyDecay with turn preset
+  // -----------------------------------------------------------------------
+
+  describe("applyDecay with turn preset", () => {
+    it("decays by turns instead of hours", async () => {
+      const config = testConfig({ decayPreset: "turn" as const });
+      const mgr = new StateManager(statePath, config);
+      let state = await mgr.getState();
+      state = {
+        ...state,
+        turnCount: 10,
+        lastDecayTurn: 5,
+        dimensions: { ...state.dimensions, pleasure: 0.8 },
+        baseline: { ...state.baseline, pleasure: 0.0 },
+      };
+
+      const decayed = mgr.applyDecay(state);
+      expect(decayed.dimensions.pleasure).toBeLessThan(0.8);
+      expect(decayed.dimensions.pleasure).toBeGreaterThan(0);
+      expect(decayed.lastDecayTurn).toBe(10);
+    });
+
+    it("does not decay when no turns elapsed", async () => {
+      const config = testConfig({ decayPreset: "turn" as const });
+      const mgr = new StateManager(statePath, config);
+      let state = await mgr.getState();
+      state = {
+        ...state,
+        turnCount: 5,
+        lastDecayTurn: 5,
+        dimensions: { ...state.dimensions, pleasure: 0.8 },
+      };
+
+      const decayed = mgr.applyDecay(state);
+      expect(decayed.dimensions.pleasure).toBe(0.8);
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // updateUserEmotion / updateAgentEmotion
   // -----------------------------------------------------------------------
 

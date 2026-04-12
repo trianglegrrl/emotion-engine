@@ -40,6 +40,15 @@ export function buildEmptyState(): EmotionEngineState {
       totalUpdates: 0,
       createdAt: now,
     },
+    turnCount: 0,
+    lastDecayTurn: 0,
+    userStyles: {},
+    tokenUsage: {
+      totalInput: 0,
+      totalOutput: 0,
+      totalCostUsd: 0,
+      classificationCount: 0,
+    },
   };
 }
 

@@ -139,6 +139,10 @@ export interface EmotionStimulus {
   sourceRole: string;
   /** SHA-256 hash of source text (to avoid re-processing). */
   sourceHash?: string;
+  /** Truncated source text excerpt for style profiling. */
+  sourceExcerpt?: string;
+  /** Token usage from the classification call that produced this stimulus. */
+  classificationTokens?: ClassificationUsage;
 }
 
 // ---------------------------------------------------------------------------
@@ -178,33 +182,6 @@ export interface EmotionBucket {
 }
 
 // ---------------------------------------------------------------------------
-// Cached LLM Analysis
-// ---------------------------------------------------------------------------
-
-/** Cached personality analysis from background LLM job. */
-export interface CachedPersonalityAnalysis {
-  summary: string;
-  generatedAt: string;
-  pad: { pleasure: number; arousal: number; dominance: number };
-  extensions: { connection: number; curiosity: number; energy: number; trust: number };
-  ocean: { openness: number; conscientiousness: number; extraversion: number; agreeableness: number; neuroticism: number };
-}
-
-/** Cached emotional state description from background LLM job. */
-export interface CachedEmotionalStateDescription {
-  summary: string;
-  generatedAt: string;
-  primary: string;
-  intensity: number;
-  notes: string[];
-}
-
-export interface CachedAnalysis {
-  personality?: CachedPersonalityAnalysis;
-  emotionalState?: CachedEmotionalStateDescription;
-}
-
-// ---------------------------------------------------------------------------
 // Persisted State (v2)
 // ---------------------------------------------------------------------------
 
@@ -239,9 +216,70 @@ export interface EmotionEngineState {
     totalUpdates: number;
     createdAt: string;
   };
-  /** Cached LLM analysis (written by background service). */
-  cachedAnalysis?: CachedAnalysis;
+  /** Conversation turn counter (incremented on each user message). */
+  turnCount: number;
+  /** Turn number at which decay was last applied. */
+  lastDecayTurn: number;
+  /** Per-user style profiles and trackers. */
+  userStyles: Record<string, UserStyleTracker>;
+  /** Aggregate token usage across all classification calls. */
+  tokenUsage: TokenUsageAggregate;
 }
+
+// ---------------------------------------------------------------------------
+// User Style Profiling
+// ---------------------------------------------------------------------------
+
+/** Tracked style dimensions for a user's communication patterns. */
+export interface UserStyleProfile {
+  /** Tendency toward exaggeration (0 = understated, 1 = hyperbolic). */
+  hyperboleTendency: number;
+  /** Use of casual profanity (0 = none, 1 = frequent). */
+  casualProfanity: number;
+  /** Emotional expressiveness in text (0 = flat, 1 = very expressive). */
+  emotionalExpressiveness: number;
+  /** Frequency of sarcasm (0 = none, 1 = frequent). */
+  sarcasmFrequency: number;
+  /** Number of messages sampled so far. */
+  sampleSize: number;
+  /** ISO 8601 timestamp of last profile update. */
+  lastUpdated: string;
+  /** User-specified overrides for style dimensions. */
+  userOverrides: string[];
+}
+
+/** Tracks a user's style profile and message counter. */
+export interface UserStyleTracker {
+  profile: UserStyleProfile;
+  messagesSinceLastProfile: number;
+}
+
+/** Aggregate token usage across all classification calls. */
+export interface TokenUsageAggregate {
+  totalInput: number;
+  totalOutput: number;
+  totalCostUsd: number;
+  classificationCount: number;
+}
+
+/** Token usage from a single classification API call. */
+export interface ClassificationUsage {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  durationMs: number;
+}
+
+/** Default style profile for new users. */
+export const DEFAULT_STYLE_PROFILE: UserStyleProfile = {
+  hyperboleTendency: 0.5,
+  casualProfanity: 0.5,
+  emotionalExpressiveness: 0.5,
+  sarcasmFrequency: 0.5,
+  sampleSize: 0,
+  lastUpdated: new Date().toISOString(),
+  userOverrides: [],
+};
 
 // ---------------------------------------------------------------------------
 // Classifier Output
@@ -277,12 +315,7 @@ export interface EmotionDimensionDelta {
 
 /** Fully resolved configuration for the OpenFeelz plugin. */
 export interface EmotionEngineConfig {
-  apiKey?: string;
-  baseUrl: string;
   model: string;
-  /** Force a specific provider: "anthropic" | "openai". Auto-detected from model name if omitted. */
-  provider?: "anthropic" | "openai";
-  classifierUrl?: string;
   confidenceMin: number;
   halfLifeHours: number;
   trendWindowHours: number;
@@ -290,27 +323,25 @@ export interface EmotionEngineConfig {
   ruminationEnabled: boolean;
   ruminationThreshold: number;
   ruminationMaxStages: number;
-  realtimeClassification: boolean;
   contextEnabled: boolean;
-  /** Include user emotions in context injection (default: false due to classification quality). */
-  includeUserEmotions: boolean;
-  decayServiceEnabled: boolean;
-  decayServiceIntervalMinutes: number;
-  dashboardEnabled: boolean;
-  timezone?: string;
+  /** Enable agent self-emotion tracking (default: true). */
+  agentEmotions: boolean;
+  /** Enable user emotion tracking (default: false). */
+  userEmotions: boolean;
+  /** Run user emotion classification synchronously (default: false). */
+  syncUserClassification: boolean;
   maxOtherAgents: number;
   emotionLabels: string[];
   personality: OCEANProfile;
-  /** Decay speed preset: fast (~1h half-life) or slow (human-like). Custom uses decayRateOverrides. */
-  decayPreset: "fast" | "slow" | "custom";
+  /** Decay speed preset: fast (~1h half-life), slow (human-like), or turn (per-turn decay). */
+  decayPreset: "fast" | "slow" | "turn";
   decayRateOverrides: Partial<Record<DimensionName, number>>;
   dimensionBaselineOverrides: Partial<DimensionalState>;
 }
 
 /** Default configuration values. */
 export const DEFAULT_CONFIG: EmotionEngineConfig = {
-  baseUrl: "https://api.openai.com/v1",
-  model: "claude-sonnet-4-5-20250514",
+  model: "claude-haiku-4-5-20251001",
   confidenceMin: 0.35,
   halfLifeHours: 12,
   trendWindowHours: 24,
@@ -318,12 +349,10 @@ export const DEFAULT_CONFIG: EmotionEngineConfig = {
   ruminationEnabled: true,
   ruminationThreshold: 0.7,
   ruminationMaxStages: 4,
-  realtimeClassification: false,
   contextEnabled: true,
-  includeUserEmotions: false,
-  decayServiceEnabled: false,
-  decayServiceIntervalMinutes: 30,
-  dashboardEnabled: true,
+  agentEmotions: true,
+  userEmotions: false,
+  syncUserClassification: false,
   maxOtherAgents: 3,
   emotionLabels: [
     "neutral",

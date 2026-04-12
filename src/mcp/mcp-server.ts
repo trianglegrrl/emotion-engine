@@ -102,7 +102,6 @@ function createQueryTool(manager: StateManager): McpTool {
         ruminationActive: state.rumination.active.length,
         totalUpdates: state.meta.totalUpdates,
         statusMarkdown: formatStatusMarkdown(state),
-        cachedAnalysis: state.cachedAnalysis,
       };
 
       return { content: JSON.stringify(data, null, 2) };

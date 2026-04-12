@@ -1,7 +1,7 @@
 {
   "name": "openfeelz",
-  "version": "1.1.1",
-  "description": "PAD + Ekman + OCEAN emotional model plugin for OpenClaw agents",
+  "version": "2.0.0",
+  "description": "Emotional model with personality-influenced decay, rumination, and multi-agent awareness for Claude Code",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -20,18 +20,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "npx oxlint ."
   },
-  "openclaw": {
-    "extensions": [
-      "./dist/index.js"
-    ]
-  },
-  "peerDependencies": {
-    "openclaw": ">=2026.1.0"
-  },
   "dependencies": {
-    "@clack/prompts": "^1.0.0",
-    "@modelcontextprotocol/sdk": "^1.26.0",
-    "commander": "^14.0.3"
+    "@modelcontextprotocol/sdk": "^1.26.0"
   },
   "devDependencies": {
     "@sinclair/typebox": "^0.34.48",
@@ -47,8 +37,7 @@
     "url": "https://github.com/trianglegrrl/openfeelz/issues"
   },
   "keywords": [
-    "openclaw",
-    "plugin",
+    "claude-code",
     "emotion",
     "affective-computing",
     "personality",
@@ -61,6 +50,16 @@
     "node": ">=22"
   },
   "license": "MIT",
-  "files": ["dist", "LICENSE", "README.md", "openclaw.plugin.json"],
-  "prepublishOnly": "npm run build"
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    ".claude-plugin",
+    "hooks",
+    "commands"
+  ],
+  "prepublishOnly": "npm run build",
+  "optionalDependencies": {
+    "@rollup/rollup-darwin-arm64": "^4.60.1"
+  }
 }

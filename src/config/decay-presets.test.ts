@@ -9,6 +9,7 @@ import {
   getEffectiveDecayRates,
   DECAY_PRESET_FAST_DIMENSIONS,
   DECAY_PRESET_FAST_EMOTIONS,
+  DEFAULT_TURN_RATE,
 } from "./decay-presets.js";
 
 describe("decay-presets", () => {
@@ -62,15 +63,32 @@ describe("decay-presets", () => {
       expect(dimensionRates.arousal).toBe(state.decayRates.arousal);
     });
 
-    it('treats "custom" like "slow" (state rates + overrides)', () => {
+    it('returns turn-based rates for turn preset', () => {
+      const config = { ...DEFAULT_CONFIG, decayPreset: "turn" as const };
+      const { dimensionRates, emotionDecayRates } = getEffectiveDecayRates(
+        state,
+        config,
+      );
+      expect(dimensionRates.pleasure).toBeGreaterThan(0);
+      expect(dimensionRates.pleasure).toBeLessThan(1);
+      // All dimension rates should be modulated from DEFAULT_TURN_RATE
+      for (const [, rate] of Object.entries(dimensionRates)) {
+        expect(rate).toBeGreaterThan(0);
+      }
+      // All emotion rates should be modulated from DEFAULT_TURN_RATE
+      for (const [, rate] of Object.entries(emotionDecayRates)) {
+        expect(rate).toBeGreaterThan(0);
+      }
+    });
+
+    it('applies decayRateOverrides when preset is "turn"', () => {
       const config = {
         ...DEFAULT_CONFIG,
-        decayPreset: "custom" as const,
+        decayPreset: "turn" as const,
         decayRateOverrides: { curiosity: 0.5 },
       };
       const { dimensionRates } = getEffectiveDecayRates(state, config);
       expect(dimensionRates.curiosity).toBe(0.5);
-      expect(dimensionRates.pleasure).toBe(state.decayRates.pleasure);
     });
   });
 });

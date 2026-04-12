@@ -7,3 +7,6 @@ coverage/
 !package-lock.json
 .cursor/
 *.tgz
+.worktrees/
+.env
+.omc
